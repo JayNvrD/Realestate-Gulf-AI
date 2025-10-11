@@ -15,7 +15,7 @@ Deno.serve(async (req: Request) => {
     const response = await fetch('https://api.heygen.com/v1/streaming.create_token', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${HEYGEN_API_KEY}`,
+        'x-api-key': HEYGEN_API_KEY,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ ttl: 60 * 15 })
