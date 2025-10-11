@@ -22,7 +22,7 @@ export default function Layout() {
     { name: 'Conversations', href: '/conversations', icon: MessageSquare },
     { name: 'Reports', href: '/reports', icon: BarChart3 },
     { name: 'Knowledge Base', href: '/kb', icon: Database },
-    { name: 'Public Links', href: '/links', icon: LinkIcon },
+    { name: 'AI Avatar', href: '/links', icon: LinkIcon },
   ];
 
   const isActive = (path: string) => location.pathname === path;

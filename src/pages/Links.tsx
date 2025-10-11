@@ -121,7 +121,7 @@ export default function Links() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Public Links</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">AI Avatar</h1>
           <p className="text-gray-600">Create and manage shareable avatar links</p>
         </div>
         <button
