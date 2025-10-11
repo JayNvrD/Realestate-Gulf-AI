@@ -4,7 +4,20 @@ import { supabase } from '../lib/supabase';
 import { PublicLink } from '../types/db';
 import { HeyGenAvatarService } from '../lib/heygen';
 import { OpenAIAssistantService } from '../lib/openai';
-import { Mic, MicOff, AlertCircle, Loader } from 'lucide-react';
+import { MessageCircle, Loader, BarChart3, X } from 'lucide-react';
+
+interface ConversationEntry {
+  role: 'user' | 'assistant';
+  text: string;
+  timestamp: Date;
+}
+
+interface Analysis {
+  sentiment?: string;
+  intent?: string;
+  topics?: string[];
+  keyPoints?: string[];
+}
 
 export default function PublicAvatar() {
   const { slug } = useParams<{ slug: string }>();
@@ -12,15 +25,16 @@ export default function PublicAvatar() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [isInitialized, setIsInitialized] = useState(false);
-  const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [transcript, setTranscript] = useState('');
-  const [userInput, setUserInput] = useState('');
+  const [conversationEntries, setConversationEntries] = useState<ConversationEntry[]>([]);
+  const [analysis, setAnalysis] = useState<Analysis>({});
+  const [isConnecting, setIsConnecting] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const avatarServiceRef = useRef<HeyGenAvatarService | null>(null);
   const openaiServiceRef = useRef<OpenAIAssistantService | null>(null);
   const recognitionRef = useRef<any>(null);
+  const interimTranscriptRef = useRef<string>('');
 
   useEffect(() => {
     if (slug) {
@@ -70,7 +84,7 @@ export default function PublicAvatar() {
     if (!videoRef.current || !link) return;
 
     try {
-      setLoading(true);
+      setIsConnecting(true);
       setError('');
 
       avatarServiceRef.current = new HeyGenAvatarService();
@@ -84,95 +98,178 @@ export default function PublicAvatar() {
       if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
         const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
         recognitionRef.current = new SpeechRecognition();
-        recognitionRef.current.continuous = false;
-        recognitionRef.current.interimResults = false;
+        recognitionRef.current.continuous = true;
+        recognitionRef.current.interimResults = true;
         recognitionRef.current.lang = 'en-US';
 
         recognitionRef.current.onresult = async (event: any) => {
-          const transcript = event.results[0][0].transcript;
-          setUserInput(transcript);
-          await handleUserMessage(transcript);
+          let interimTranscript = '';
+          let finalTranscript = '';
+
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              finalTranscript += transcript;
+            } else {
+              interimTranscript += transcript;
+            }
+          }
+
+          interimTranscriptRef.current = interimTranscript;
+
+          if (finalTranscript) {
+            await handleUserMessage(finalTranscript);
+          }
         };
 
         recognitionRef.current.onerror = (event: any) => {
           console.error('Speech recognition error:', event.error);
-          setIsListening(false);
+          if (event.error !== 'no-speech') {
+            setError('Voice recognition error. Please try again.');
+          }
         };
 
         recognitionRef.current.onend = () => {
-          setIsListening(false);
+          if (isInitialized && !isSpeaking) {
+            try {
+              recognitionRef.current?.start();
+            } catch (e) {
+              console.log('Recognition restart skipped');
+            }
+          }
         };
+
+        recognitionRef.current.start();
       }
 
       setIsInitialized(true);
+      setIsConnecting(false);
 
-      const greeting = "Hello! I'm Estate Buddy, your real estate assistant. How can I help you find your perfect property today?";
-      setTranscript(prev => `Assistant: ${greeting}\n\n${prev}`);
+      const greeting = "Hello! I'm Estate Buddy, your AI real estate assistant. How can I help you find your perfect property today?";
+      const entry: ConversationEntry = {
+        role: 'assistant',
+        text: greeting,
+        timestamp: new Date()
+      };
+      setConversationEntries([entry]);
+
       await avatarServiceRef.current.speak(greeting);
     } catch (err) {
       console.error('Error initializing avatar:', err);
       setError('Failed to initialize avatar. Please try again.');
-    } finally {
-      setLoading(false);
+      setIsConnecting(false);
     }
   };
 
   const handleUserMessage = async (message: string) => {
-    if (!avatarServiceRef.current || !openaiServiceRef.current || !message.trim()) {
+    if (!avatarServiceRef.current || !openaiServiceRef.current || !message.trim() || isSpeaking) {
       return;
     }
 
     try {
       setIsSpeaking(true);
-      setTranscript(prev => `You: ${message}\n\n${prev}`);
+
+      const userEntry: ConversationEntry = {
+        role: 'user',
+        text: message,
+        timestamp: new Date()
+      };
+      setConversationEntries(prev => [userEntry, ...prev]);
+
+      analyzeMessage(message, 'user');
 
       const response = await openaiServiceRef.current.sendMessage(message);
 
-      setTranscript(prev => `Assistant: ${response}\n\n${prev}`);
+      const assistantEntry: ConversationEntry = {
+        role: 'assistant',
+        text: response,
+        timestamp: new Date()
+      };
+      setConversationEntries(prev => [assistantEntry, ...prev]);
+
+      analyzeMessage(response, 'assistant');
 
       await avatarServiceRef.current.speak(response);
     } catch (err) {
       console.error('Error processing message:', err);
       const errorMsg = 'I apologize, but I encountered an error. Could you please try again?';
-      setTranscript(prev => `Assistant: ${errorMsg}\n\n${prev}`);
+      const errorEntry: ConversationEntry = {
+        role: 'assistant',
+        text: errorMsg,
+        timestamp: new Date()
+      };
+      setConversationEntries(prev => [errorEntry, ...prev]);
 
       if (avatarServiceRef.current) {
         await avatarServiceRef.current.speak(errorMsg);
       }
     } finally {
       setIsSpeaking(false);
-      setUserInput('');
     }
   };
 
-  const toggleListening = () => {
-    if (!recognitionRef.current) {
-      alert('Speech recognition is not supported in your browser. Please use text input.');
-      return;
+  const analyzeMessage = (text: string, role: 'user' | 'assistant') => {
+    const lowerText = text.toLowerCase();
+
+    const sentiments = ['positive', 'neutral', 'negative'];
+    let detectedSentiment = 'neutral';
+    if (lowerText.includes('great') || lowerText.includes('perfect') || lowerText.includes('excellent') || lowerText.includes('love')) {
+      detectedSentiment = 'positive';
+    } else if (lowerText.includes('not') || lowerText.includes('no') || lowerText.includes('don\'t')) {
+      detectedSentiment = 'negative';
     }
 
-    if (isListening) {
-      recognitionRef.current.stop();
-      setIsListening(false);
-    } else {
-      recognitionRef.current.start();
-      setIsListening(true);
+    const topics: string[] = [];
+    if (lowerText.includes('property') || lowerText.includes('flat') || lowerText.includes('apartment')) topics.push('Property Inquiry');
+    if (lowerText.includes('price') || lowerText.includes('budget') || lowerText.includes('cost')) topics.push('Pricing');
+    if (lowerText.includes('location') || lowerText.includes('area') || lowerText.includes('where')) topics.push('Location');
+    if (lowerText.includes('amenity') || lowerText.includes('amenities') || lowerText.includes('facilities')) topics.push('Amenities');
+    if (lowerText.includes('bhk') || lowerText.includes('bedroom')) topics.push('Unit Type');
+
+    const keyPoints: string[] = [];
+    if (role === 'user') {
+      if (lowerText.includes('looking for') || lowerText.includes('want')) {
+        keyPoints.push('Active search intent');
+      }
+      if (lowerText.match(/\d+\s*(bhk|bedroom)/)) {
+        keyPoints.push('Specific unit requirement');
+      }
+      if (lowerText.match(/\d+\s*(lakh|crore|million)/)) {
+        keyPoints.push('Budget mentioned');
+      }
+    }
+
+    setAnalysis({
+      sentiment: detectedSentiment,
+      intent: role === 'user' ? 'Information Seeking' : 'Information Providing',
+      topics: topics.length > 0 ? topics : ['General Conversation'],
+      keyPoints: keyPoints.length > 0 ? keyPoints : ['Engagement ongoing']
+    });
+  };
+
+  const endSession = async () => {
+    try {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      if (avatarServiceRef.current) {
+        await avatarServiceRef.current.close();
+      }
+      setIsInitialized(false);
+      setConversationEntries([]);
+      setAnalysis({});
+      window.location.reload();
+    } catch (err) {
+      console.error('Error ending session:', err);
     }
   };
 
-  const handleTextSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (userInput.trim()) {
-      await handleUserMessage(userInput);
-    }
-  };
-
-  if (loading && !isInitialized) {
+  if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-blue-50 to-indigo-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
         <div className="text-center">
-          <Loader className="w-12 h-12 text-cyan-600 animate-spin mx-auto mb-4" />
-          <div className="text-gray-600">Loading...</div>
+          <Loader className="w-12 h-12 text-blue-400 animate-spin mx-auto mb-4" />
+          <div className="text-slate-300 text-lg">Loading avatar...</div>
         </div>
       </div>
     );
@@ -180,137 +277,241 @@ export default function PublicAvatar() {
 
   if (error || !link) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-blue-50 to-indigo-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl p-8 max-w-md w-full text-center border border-red-200">
-          <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Error</h2>
-          <p className="text-gray-600">{error}</p>
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
+        <div className="bg-slate-800 rounded-xl p-8 max-w-md w-full text-center border border-red-500/30">
+          <X className="w-16 h-16 text-red-400 mx-auto mb-4" />
+          <h2 className="text-2xl font-bold text-white mb-2">Error</h2>
+          <p className="text-slate-300">{error}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-blue-50 to-indigo-50 flex flex-col items-center justify-center p-4">
-      <div className="max-w-5xl w-full">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-3">{link.title}</h1>
-          <p className="text-lg text-gray-600">
-            {link.config.avatarName || 'Estate Buddy'} is ready to help you
-          </p>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
+      {isInitialized && (
+        <button
+          onClick={endSession}
+          className="fixed top-6 right-6 z-50 px-6 py-3 bg-red-500 hover:bg-red-600 text-white rounded-lg font-semibold flex items-center gap-2 transition-all shadow-lg hover:shadow-red-500/50"
+        >
+          <X className="w-5 h-5" />
+          End Session
+        </button>
+      )}
+
+      <div className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-12 gap-4 h-[90vh]">
+        <div className="lg:col-span-3 bg-slate-800/60 backdrop-blur-lg rounded-2xl p-6 border border-slate-700/50 overflow-hidden flex flex-col">
+          <div className="mb-4">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <MessageCircle className="w-5 h-5 text-blue-400" />
+              Conversation
+            </h2>
+            <p className="text-sm text-slate-400 mt-1">Live transcript</p>
+          </div>
+
+          {conversationEntries.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center">
+              <p className="text-slate-500 text-sm italic text-center">
+                Start speaking to see the conversation here
+              </p>
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+              {conversationEntries.map((entry, idx) => (
+                <div
+                  key={idx}
+                  className={`p-3 rounded-lg ${
+                    entry.role === 'user'
+                      ? 'bg-blue-500/20 border border-blue-500/30'
+                      : 'bg-slate-700/40 border border-slate-600/30'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className={`text-xs font-semibold ${
+                      entry.role === 'user' ? 'text-blue-400' : 'text-emerald-400'
+                    }`}>
+                      {entry.role === 'user' ? 'You' : 'Assistant'}
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      {entry.timestamp.toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-200 leading-relaxed">{entry.text}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2">
-            <div className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-gray-200">
-              <div className="aspect-video bg-gradient-to-br from-gray-900 to-gray-800 relative">
-                {!isInitialized ? (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="text-center">
-                      <div className="w-32 h-32 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
-                        <Mic className="w-16 h-16 text-white" />
-                      </div>
-                      <p className="text-white text-xl font-medium mb-8">
-                        Ready to start the conversation
-                      </p>
-                      <button
-                        onClick={initializeAvatar}
-                        disabled={loading}
-                        className="px-12 py-5 bg-gradient-to-r from-cyan-500 to-blue-600 text-white rounded-2xl text-xl font-semibold hover:shadow-2xl transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {loading ? 'Initializing...' : 'Start Conversation'}
-                      </button>
+        <div className="lg:col-span-6 flex flex-col">
+          <div className="flex-1 bg-slate-800/60 backdrop-blur-lg rounded-2xl overflow-hidden border border-slate-700/50 relative">
+            {!isInitialized ? (
+              <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-900 to-slate-800">
+                {isConnecting ? (
+                  <div className="text-center">
+                    <div className="relative w-24 h-24 mx-auto mb-6">
+                      <div className="absolute inset-0 rounded-full border-4 border-blue-500/30"></div>
+                      <div className="absolute inset-0 rounded-full border-4 border-t-blue-500 animate-spin"></div>
                     </div>
+                    <p className="text-white text-xl font-medium animate-pulse">
+                      Connecting...
+                    </p>
                   </div>
                 ) : (
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    className="w-full h-full object-cover"
-                  />
+                  <div className="text-center px-6">
+                    <div className="w-32 h-32 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-full flex items-center justify-center mx-auto mb-8 shadow-2xl shadow-blue-500/50">
+                      <MessageCircle className="w-16 h-16 text-white" />
+                    </div>
+                    <h2 className="text-3xl font-bold text-white mb-3">{link.title}</h2>
+                    <p className="text-slate-300 text-lg mb-8 max-w-md mx-auto">
+                      Start a conversation with your AI real estate assistant
+                    </p>
+                    <button
+                      onClick={initializeAvatar}
+                      disabled={loading}
+                      className="px-10 py-4 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-xl text-lg font-semibold hover:shadow-2xl hover:shadow-blue-500/50 transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Start Conversation
+                    </button>
+                  </div>
                 )}
               </div>
-
-              {isInitialized && (
-                <div className="p-6 bg-gray-50 border-t border-gray-200">
-                  <form onSubmit={handleTextSubmit} className="space-y-4">
-                    <div className="flex gap-3">
-                      <input
-                        type="text"
-                        value={userInput}
-                        onChange={(e) => setUserInput(e.target.value)}
-                        placeholder="Type your message or use voice..."
-                        className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
-                        disabled={isSpeaking || isListening}
-                      />
-                      <button
-                        type="button"
-                        onClick={toggleListening}
-                        disabled={isSpeaking}
-                        className={`px-6 py-3 rounded-lg font-medium transition-all ${
-                          isListening
-                            ? 'bg-red-500 text-white hover:bg-red-600'
-                            : 'bg-cyan-600 text-white hover:bg-cyan-700'
-                        } disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2`}
-                      >
-                        {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-                        {isListening ? 'Stop' : 'Voice'}
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={!userInput.trim() || isSpeaking || isListening}
-                        className="px-8 py-3 bg-gradient-to-r from-cyan-500 to-blue-600 text-white rounded-lg font-medium hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        Send
-                      </button>
-                    </div>
-                    {isSpeaking && (
-                      <div className="text-center text-sm text-gray-600">
-                        <Loader className="w-4 h-4 animate-spin inline mr-2" />
-                        Processing your request...
+            ) : (
+              <>
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  className="w-full h-full object-cover"
+                />
+                {isSpeaking && (
+                  <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-slate-900/90 backdrop-blur-sm px-6 py-3 rounded-full border border-slate-700">
+                    <div className="flex items-center gap-3">
+                      <div className="flex gap-1">
+                        <div className="w-1 h-4 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0ms' }}></div>
+                        <div className="w-1 h-4 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></div>
+                        <div className="w-1 h-4 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></div>
                       </div>
-                    )}
-                  </form>
+                      <span className="text-sm text-slate-300 font-medium">Processing...</span>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {isInitialized && (
+            <div className="mt-4 bg-slate-800/60 backdrop-blur-lg rounded-xl p-4 border border-slate-700/50">
+              <div className="flex items-center justify-center gap-4 text-sm text-slate-400">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                  <span>Voice Active</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                  <span>AI Listening</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
+                  <span>Real-time</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="lg:col-span-3 bg-slate-800/60 backdrop-blur-lg rounded-2xl p-6 border border-slate-700/50 overflow-hidden flex flex-col">
+          <div className="mb-4">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 text-purple-400" />
+              Interpretation
+            </h2>
+            <p className="text-sm text-slate-400 mt-1">Real-time analysis</p>
+          </div>
+
+          {conversationEntries.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center">
+              <BarChart3 className="w-16 h-16 text-slate-600 mb-4" />
+              <p className="text-slate-500 text-sm italic">
+                Analysis will appear here during conversation
+              </p>
+            </div>
+          ) : (
+            <div className="flex-1 space-y-6">
+              {analysis.sentiment && (
+                <div className="bg-slate-700/40 rounded-lg p-4 border border-slate-600/30">
+                  <h3 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">
+                    Sentiment
+                  </h3>
+                  <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium ${
+                    analysis.sentiment === 'positive'
+                      ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                      : analysis.sentiment === 'negative'
+                      ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                      : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                  }`}>
+                    <div className={`w-2 h-2 rounded-full ${
+                      analysis.sentiment === 'positive'
+                        ? 'bg-green-400'
+                        : analysis.sentiment === 'negative'
+                        ? 'bg-red-400'
+                        : 'bg-blue-400'
+                    }`}></div>
+                    {analysis.sentiment.charAt(0).toUpperCase() + analysis.sentiment.slice(1)}
+                  </div>
+                </div>
+              )}
+
+              {analysis.intent && (
+                <div className="bg-slate-700/40 rounded-lg p-4 border border-slate-600/30">
+                  <h3 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">
+                    Intent
+                  </h3>
+                  <p className="text-sm text-slate-200">{analysis.intent}</p>
+                </div>
+              )}
+
+              {analysis.topics && analysis.topics.length > 0 && (
+                <div className="bg-slate-700/40 rounded-lg p-4 border border-slate-600/30">
+                  <h3 className="text-xs font-semibold text-slate-400 mb-3 uppercase tracking-wider">
+                    Topics Detected
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {analysis.topics.map((topic, idx) => (
+                      <span
+                        key={idx}
+                        className="px-3 py-1 bg-purple-500/20 text-purple-300 text-xs font-medium rounded-full border border-purple-500/30"
+                      >
+                        {topic}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {analysis.keyPoints && analysis.keyPoints.length > 0 && (
+                <div className="bg-slate-700/40 rounded-lg p-4 border border-slate-600/30">
+                  <h3 className="text-xs font-semibold text-slate-400 mb-3 uppercase tracking-wider">
+                    Key Points
+                  </h3>
+                  <ul className="space-y-2">
+                    {analysis.keyPoints.map((point, idx) => (
+                      <li key={idx} className="flex items-start gap-2 text-sm text-slate-300">
+                        <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-1.5 flex-shrink-0"></div>
+                        <span>{point}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </div>
-          </div>
-
-          <div className="lg:col-span-1">
-            <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm h-full">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Conversation</h3>
-              <div className="space-y-3 max-h-96 overflow-y-auto">
-                {transcript ? (
-                  <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans">
-                    {transcript}
-                  </pre>
-                ) : (
-                  <p className="text-sm text-gray-500 italic">
-                    Conversation will appear here...
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
+          )}
         </div>
+      </div>
 
-        <div className="mt-8 text-center">
-          <div className="inline-flex items-center gap-4 text-sm text-gray-600 bg-white px-6 py-3 rounded-full shadow-sm">
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
-              <span>Voice Enabled</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-              <span>AI Powered</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-cyan-500 rounded-full"></div>
-              <span>Real-time</span>
-            </div>
-          </div>
-        </div>
+      <div className="fixed bottom-4 right-4 text-xs text-slate-500 flex items-center gap-2">
+        <span className="opacity-60">Powered by</span>
+        <span className="font-semibold text-slate-400">HeyGen</span>
       </div>
     </div>
   );
