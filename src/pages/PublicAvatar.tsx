@@ -12,7 +12,7 @@ interface ConversationEntry {
   timestamp: Date;
 }
 
-// Deepgram STT Service — Fetches key via Supabase Function
+// ✅ Deepgram Speech-to-Text Service using Supabase Token Authentication
 class DeepgramSTTService {
   private socket: WebSocket | null = null;
   private audioContext: AudioContext | null = null;
@@ -20,8 +20,7 @@ class DeepgramSTTService {
   private source: MediaStreamAudioSourceNode | null = null;
   private processor: ScriptProcessorNode | null = null;
   private onTranscriptionCallback?: (text: string) => void;
-
-  constructor() {}
+  private reconnecting = false;
 
   async startListening(onTranscription: (text: string) => void) {
     this.onTranscriptionCallback = onTranscription;
@@ -35,44 +34,66 @@ class DeepgramSTTService {
     this.source.connect(this.processor);
     this.processor.connect(this.audioContext.destination);
 
-    console.log('[DeepgramSTT] Fetching Deepgram key via Supabase...');
+    // ✅ Fetch temporary Deepgram token from Supabase Edge Function
+    console.log('[DeepgramSTT] Fetching Deepgram token via Supabase...');
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+    if (!supabaseUrl || !supabaseAnonKey) {
+      throw new Error('[DeepgramSTT] Missing Supabase environment variables');
+    }
+
     const response = await fetch(`${supabaseUrl}/functions/v1/deepgram-token`, {
       headers: {
-        'Authorization': `Bearer ${supabaseAnonKey}`,
-        'Content-Type': 'application/json'
-      }
+        Authorization: `Bearer ${supabaseAnonKey}`,
+        'Content-Type': 'application/json',
+      },
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[DeepgramSTT] Failed to fetch key:', response.status, errorText);
-      throw new Error(`Failed to fetch Deepgram key: ${response.status}`);
+      console.error('[DeepgramSTT] ❌ Failed to fetch token:', response.status, errorText);
+      throw new Error(`Failed to fetch Deepgram token: ${response.status}`);
     }
 
-    const { key } = await response.json();
-    console.log('[DeepgramSTT] Key retrieved successfully');
+    const { token } = await response.json();
+    if (!token) throw new Error('[DeepgramSTT] No token returned from Supabase function');
+    console.log('[DeepgramSTT] 🔑 Token retrieved successfully');
 
-    console.log('[DeepgramSTT] Opening Deepgram WebSocket...');
+    // 🎧 Connect to Deepgram WebSocket using token authentication
     this.socket = new WebSocket(
       'wss://api.deepgram.com/v1/listen?model=general&language=en-US&punctuate=true',
-      ['token', key]
+      ['token', token]
     );
+    this.socket.binaryType = 'arraybuffer';
 
-    this.socket.onopen = () => console.log('[DeepgramSTT] Connected to Deepgram');
+    // 🔗 WebSocket lifecycle handlers
+    this.socket.onopen = () => console.log('[DeepgramSTT] ✅ Connected to Deepgram');
     this.socket.onerror = (err) => console.error('[DeepgramSTT] WebSocket error:', err);
-    this.socket.onclose = () => console.log('[DeepgramSTT] Connection closed');
-
-    this.socket.onmessage = (message) => {
-      const data = JSON.parse(message.data);
-      const transcript = data.channel?.alternatives?.[0]?.transcript;
-      if (transcript && this.onTranscriptionCallback) {
-        this.onTranscriptionCallback(transcript);
+    this.socket.onclose = () => {
+      console.warn('[DeepgramSTT] ⚠️ Connection closed');
+      if (!this.reconnecting) {
+        this.reconnecting = true;
+        console.log('[DeepgramSTT] Attempting reconnection in 3s...');
+        setTimeout(() => this.startListening(onTranscription), 3000);
       }
     };
 
+    // 🎤 Handle transcripts
+    this.socket.onmessage = (message) => {
+      try {
+        const data = JSON.parse(message.data);
+        const transcript = data.channel?.alternatives?.[0]?.transcript;
+        if (data.is_final && transcript && this.onTranscriptionCallback) {
+          console.log('[DeepgramSTT] Transcript:', transcript);
+          this.onTranscriptionCallback(transcript.trim());
+        }
+      } catch (error) {
+        console.error('[DeepgramSTT] Message parse error:', error);
+      }
+    };
+
+    // 🎙️ Stream audio to Deepgram
     this.processor.onaudioprocess = (event) => {
       if (this.socket?.readyState !== WebSocket.OPEN) return;
       const inputData = event.inputBuffer.getChannelData(0);
@@ -84,16 +105,16 @@ class DeepgramSTTService {
   private floatTo16BitPCM(float32Array: Float32Array) {
     const buffer = new ArrayBuffer(float32Array.length * 2);
     const view = new DataView(buffer);
-    let offset = 0;
-    for (let i = 0; i < float32Array.length; i++, offset += 2) {
+    for (let i = 0; i < float32Array.length; i++) {
       const s = Math.max(-1, Math.min(1, float32Array[i]));
-      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
     }
     return buffer;
   }
 
   stopListening() {
-    console.log('[DeepgramSTT] Stopping...');
+    console.log('[DeepgramSTT] 🛑 Stopping...');
+    this.reconnecting = false;
     this.processor?.disconnect();
     this.source?.disconnect();
     this.mediaStream?.getTracks().forEach((t) => t.stop());
