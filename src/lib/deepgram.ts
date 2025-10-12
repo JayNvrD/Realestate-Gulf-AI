@@ -1,9 +1,12 @@
+// src/lib/deepgram.ts
+
 export class DeepgramSTTService {
   private socket: WebSocket | null = null;
   private mediaStream: MediaStream | null = null;
   private audioContext: AudioContext | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
   private processor: ScriptProcessorNode | null = null;
+  private reconnecting = false;
 
   async startListening(onTranscript: (text: string) => void) {
     console.log('[DeepgramSTT] Requesting microphone access...');
@@ -14,18 +17,11 @@ export class DeepgramSTTService {
     this.source.connect(this.processor);
     this.processor.connect(this.audioContext.destination);
 
-    // ✅ Fetch Deepgram key from Supabase (securely)
+    // ✅ Fetch Deepgram key from your Supabase Edge Function (no auth needed now)
     console.log('[DeepgramSTT] Fetching Deepgram key via Supabase...');
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-    const res = await fetch(`${supabaseUrl}/functions/v1/deepgram-token`, {
-      headers: {
-        'Authorization': `Bearer ${anonKey}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
+    const res = await fetch(`${supabaseUrl}/functions/v1/deepgram-token`);
     if (!res.ok) {
       const text = await res.text();
       console.error('[DeepgramSTT] Failed to fetch key:', res.status, text);
@@ -35,23 +31,36 @@ export class DeepgramSTTService {
     const { key } = await res.json();
     console.log('[DeepgramSTT] Key retrieved successfully');
 
-    // 🎧 Open Deepgram WebSocket with token subprotocol
+    // 🎧 Connect to Deepgram WebSocket using token authentication
     const protocol = ['token', key];
     this.socket = new WebSocket(
-      `wss://api.deepgram.com/v1/listen?model=general&language=en-US&punctuate=true`,
+      'wss://api.deepgram.com/v1/listen?model=general&language=en-US&punctuate=true',
       protocol
     );
     this.socket.binaryType = 'arraybuffer';
 
+    // Connection lifecycle handlers
     this.socket.onopen = () => console.log('[DeepgramSTT] Connected');
     this.socket.onerror = (e) => console.error('[DeepgramSTT] WebSocket error:', e);
-    this.socket.onclose = () => console.log('[DeepgramSTT] Closed');
+    this.socket.onclose = () => {
+      console.warn('[DeepgramSTT] Connection closed');
+      if (!this.reconnecting) {
+        this.reconnecting = true;
+        setTimeout(() => this.startListening(onTranscript), 3000);
+      }
+    };
 
+    // Handle incoming transcription messages
     this.socket.onmessage = (e) => {
-      const msg = JSON.parse(e.data);
-      const transcript = msg.channel?.alternatives?.[0]?.transcript;
-      if (msg.is_final && transcript?.trim()) {
-        onTranscript(transcript.trim());
+      try {
+        const msg = JSON.parse(e.data);
+        const transcript = msg.channel?.alternatives?.[0]?.transcript;
+        if (msg.is_final && transcript?.trim()) {
+          console.log('[DeepgramSTT] Transcript:', transcript);
+          onTranscript(transcript.trim());
+        }
+      } catch (err) {
+        console.error('[DeepgramSTT] Message parse error:', err);
       }
     };
 
@@ -65,11 +74,21 @@ export class DeepgramSTTService {
   }
 
   stopListening() {
+    console.log('[DeepgramSTT] Stopping listener...');
+    this.reconnecting = false;
+
     this.processor?.disconnect();
     this.source?.disconnect();
     this.mediaStream?.getTracks().forEach((t) => t.stop());
     this.socket?.close();
     this.audioContext?.close();
+
+    this.socket = null;
+    this.mediaStream = null;
+    this.audioContext = null;
+    this.source = null;
+    this.processor = null;
+
     console.log('[DeepgramSTT] Stopped listening');
   }
 
