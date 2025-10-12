@@ -27,12 +27,23 @@ export class DeepgramSTTService {
 
     // 2. Fetch key (or token) from your backend function
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const resp = await fetch(`${supabaseUrl}/functions/v1/deepgram-token`);
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+    const resp = await fetch(`${supabaseUrl}/functions/v1/deepgram-token`, {
+      headers: {
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
     if (!resp.ok) {
       const err = await resp.text();
+      console.error(`[DeepgramSTT] Failed to fetch key: ${resp.status}`, err);
       throw new Error(`Failed to fetch Deepgram key: ${resp.status} ${err}`);
     }
+
     const { key } = await resp.json();
+    console.log('[DeepgramSTT] Key retrieved successfully');
 
     // 3. Open WebSocket with subprotocol 'token'
     const protocol = ['token', key];
