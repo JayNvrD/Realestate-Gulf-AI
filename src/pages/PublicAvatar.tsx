@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import { PublicLink } from '../types/db';
 import { HeyGenAvatarService } from '../lib/heygen';
 import { OpenAIAssistantService } from '../lib/openai';
-import { MessageCircle, Loader, BarChart3, X } from 'lucide-react';
+import { MessageCircle, Loader, TrendingUp, X } from 'lucide-react';
 
 interface ConversationEntry {
   role: 'user' | 'assistant';
@@ -73,7 +73,7 @@ export default function PublicAvatar() {
 
       setLink(data);
     } catch (err) {
-      console.error('Error loading link:', err);
+      console.error('[PublicAvatar] Error loading link:', err);
       setError('Failed to load avatar configuration');
     } finally {
       setLoading(false);
@@ -81,26 +81,35 @@ export default function PublicAvatar() {
   };
 
   const initializeAvatar = async () => {
-    if (!videoRef.current || !link) return;
+    if (!videoRef.current || !link) {
+      console.error('[PublicAvatar] Cannot initialize: missing videoRef or link');
+      return;
+    }
 
     try {
+      console.log('[PublicAvatar] Starting avatar initialization...');
       setIsConnecting(true);
       setError('');
 
+      console.log('[PublicAvatar] Creating service instances...');
       avatarServiceRef.current = new HeyGenAvatarService();
       openaiServiceRef.current = new OpenAIAssistantService();
 
+      console.log('[PublicAvatar] Initializing HeyGen avatar with config:', link.config);
       await avatarServiceRef.current.initialize(
         videoRef.current,
         link.config.avatarName
       );
+      console.log('[PublicAvatar] HeyGen avatar initialized successfully');
 
+      console.log('[PublicAvatar] Setting up speech recognition...');
       if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
         const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
         recognitionRef.current = new SpeechRecognition();
         recognitionRef.current.continuous = true;
         recognitionRef.current.interimResults = true;
         recognitionRef.current.lang = 'en-US';
+        console.log('[PublicAvatar] Speech recognition configured');
 
         recognitionRef.current.onresult = async (event: any) => {
           let interimTranscript = '';
@@ -123,7 +132,7 @@ export default function PublicAvatar() {
         };
 
         recognitionRef.current.onerror = (event: any) => {
-          console.error('Speech recognition error:', event.error);
+          console.error('[PublicAvatar] Speech recognition error:', event.error);
           if (event.error !== 'no-speech') {
             setError('Voice recognition error. Please try again.');
           }
@@ -134,16 +143,20 @@ export default function PublicAvatar() {
             try {
               recognitionRef.current?.start();
             } catch (e) {
-              console.log('Recognition restart skipped');
+              console.log('[PublicAvatar] Recognition restart skipped');
             }
           }
         };
 
         recognitionRef.current.start();
+        console.log('[PublicAvatar] Speech recognition started');
+      } else {
+        console.warn('[PublicAvatar] Speech recognition not available in this browser');
       }
 
       setIsInitialized(true);
       setIsConnecting(false);
+      console.log('[PublicAvatar] Avatar fully initialized');
 
       const greeting = "Hello! I'm Estate Buddy, your AI real estate assistant. How can I help you find your perfect property today?";
       const entry: ConversationEntry = {
@@ -153,10 +166,16 @@ export default function PublicAvatar() {
       };
       setConversationEntries([entry]);
 
+      console.log('[PublicAvatar] Speaking greeting...');
       await avatarServiceRef.current.speak(greeting);
+      console.log('[PublicAvatar] Greeting completed');
     } catch (err) {
-      console.error('Error initializing avatar:', err);
-      setError('Failed to initialize avatar. Please try again.');
+      console.error('[PublicAvatar] Fatal error during initialization:', err);
+      if (err instanceof Error) {
+        console.error('[PublicAvatar] Error message:', err.message);
+        console.error('[PublicAvatar] Error stack:', err.stack);
+      }
+      setError('Failed to initialize avatar. Please check console for details and try again.');
       setIsConnecting(false);
     }
   };
@@ -191,7 +210,7 @@ export default function PublicAvatar() {
 
       await avatarServiceRef.current.speak(response);
     } catch (err) {
-      console.error('Error processing message:', err);
+      console.error('[PublicAvatar] Error processing message:', err);
       const errorMsg = 'I apologize, but I encountered an error. Could you please try again?';
       const errorEntry: ConversationEntry = {
         role: 'assistant',
@@ -260,7 +279,7 @@ export default function PublicAvatar() {
       setAnalysis({});
       window.location.reload();
     } catch (err) {
-      console.error('Error ending session:', err);
+      console.error('[PublicAvatar] Error ending session:', err);
     }
   };
 
@@ -288,7 +307,18 @@ export default function PublicAvatar() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
+    <div className="fixed inset-0 overflow-hidden">
+      <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+        {isInitialized && (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+        )}
+      </div>
+
       {isInitialized && (
         <button
           onClick={endSession}
@@ -299,219 +329,213 @@ export default function PublicAvatar() {
         </button>
       )}
 
-      <div className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-12 gap-4 h-[90vh]">
-        <div className="lg:col-span-3 bg-slate-800/60 backdrop-blur-lg rounded-2xl p-6 border border-slate-700/50 overflow-hidden flex flex-col">
-          <div className="mb-4">
-            <h2 className="text-xl font-bold text-white flex items-center gap-2">
-              <MessageCircle className="w-5 h-5 text-blue-400" />
-              Conversation
-            </h2>
-            <p className="text-sm text-slate-400 mt-1">Live transcript</p>
-          </div>
-
-          {conversationEntries.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center">
-              <p className="text-slate-500 text-sm italic text-center">
-                Start speaking to see the conversation here
-              </p>
-            </div>
-          ) : (
-            <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
-              {conversationEntries.map((entry, idx) => (
-                <div
-                  key={idx}
-                  className={`p-3 rounded-lg ${
-                    entry.role === 'user'
-                      ? 'bg-blue-500/20 border border-blue-500/30'
-                      : 'bg-slate-700/40 border border-slate-600/30'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className={`text-xs font-semibold ${
-                      entry.role === 'user' ? 'text-blue-400' : 'text-emerald-400'
-                    }`}>
-                      {entry.role === 'user' ? 'You' : 'Assistant'}
-                    </span>
-                    <span className="text-xs text-slate-500">
-                      {entry.timestamp.toLocaleTimeString()}
-                    </span>
-                  </div>
-                  <p className="text-sm text-slate-200 leading-relaxed">{entry.text}</p>
+      <div className="relative z-10 w-full h-full flex items-center justify-center p-6">
+        {!isInitialized ? (
+          <div className="text-center">
+            {isConnecting ? (
+              <div className="text-center">
+                <div className="relative w-24 h-24 mx-auto mb-6">
+                  <div className="absolute inset-0 rounded-full border-4 border-white/30"></div>
+                  <div className="absolute inset-0 rounded-full border-4 border-t-white animate-spin"></div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="lg:col-span-6 flex flex-col">
-          <div className="flex-1 bg-slate-800/60 backdrop-blur-lg rounded-2xl overflow-hidden border border-slate-700/50 relative">
-            {!isInitialized ? (
-              <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-900 to-slate-800">
-                {isConnecting ? (
-                  <div className="text-center">
-                    <div className="relative w-24 h-24 mx-auto mb-6">
-                      <div className="absolute inset-0 rounded-full border-4 border-blue-500/30"></div>
-                      <div className="absolute inset-0 rounded-full border-4 border-t-blue-500 animate-spin"></div>
-                    </div>
-                    <p className="text-white text-xl font-medium animate-pulse">
-                      Connecting...
-                    </p>
-                  </div>
-                ) : (
-                  <div className="text-center px-6">
-                    <div className="w-32 h-32 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-full flex items-center justify-center mx-auto mb-8 shadow-2xl shadow-blue-500/50">
-                      <MessageCircle className="w-16 h-16 text-white" />
-                    </div>
-                    <h2 className="text-3xl font-bold text-white mb-3">{link.title}</h2>
-                    <p className="text-slate-300 text-lg mb-8 max-w-md mx-auto">
-                      Start a conversation with your AI real estate assistant
-                    </p>
-                    <button
-                      onClick={initializeAvatar}
-                      disabled={loading}
-                      className="px-10 py-4 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-xl text-lg font-semibold hover:shadow-2xl hover:shadow-blue-500/50 transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Start Conversation
-                    </button>
-                  </div>
-                )}
+                <p className="text-white text-xl font-medium animate-pulse">
+                  Connecting...
+                </p>
               </div>
             ) : (
-              <>
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  className="w-full h-full object-cover"
-                />
-                {isSpeaking && (
-                  <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-slate-900/90 backdrop-blur-sm px-6 py-3 rounded-full border border-slate-700">
-                    <div className="flex items-center gap-3">
-                      <div className="flex gap-1">
-                        <div className="w-1 h-4 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0ms' }}></div>
-                        <div className="w-1 h-4 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></div>
-                        <div className="w-1 h-4 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></div>
-                      </div>
-                      <span className="text-sm text-slate-300 font-medium">Processing...</span>
-                    </div>
+              <div className="text-center px-6">
+                <div className="w-32 h-32 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-full flex items-center justify-center mx-auto mb-8 shadow-2xl shadow-blue-500/50">
+                  <MessageCircle className="w-16 h-16 text-white" />
+                </div>
+                <h2 className="text-3xl font-bold text-white mb-3">{link.title}</h2>
+                <p className="text-slate-300 text-lg mb-8 max-w-md mx-auto">
+                  Start a conversation with your AI real estate assistant
+                </p>
+                <button
+                  onClick={initializeAvatar}
+                  disabled={loading || isConnecting}
+                  className="px-10 py-4 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-xl text-lg font-semibold hover:shadow-2xl hover:shadow-blue-500/50 transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Start Conversation
+                </button>
+                {error && (
+                  <div className="mt-6 p-4 bg-red-500/20 border border-red-500/50 rounded-lg max-w-md mx-auto">
+                    <p className="text-red-300 text-sm">{error}</p>
                   </div>
                 )}
-              </>
+              </div>
             )}
           </div>
+        ) : (
+          <div className="w-full max-w-7xl h-full flex gap-6">
+            <div className="w-80 bg-slate-800/40 backdrop-blur-xl rounded-2xl p-6 border border-white/10 shadow-2xl flex flex-col h-full">
+              <div className="mb-4">
+                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                  <MessageCircle className="w-5 h-5" />
+                  Conversation
+                </h2>
+                <p className="text-sm text-slate-400 mt-1">Live transcript</p>
+              </div>
 
-          {isInitialized && (
-            <div className="mt-4 bg-slate-800/60 backdrop-blur-lg rounded-xl p-4 border border-slate-700/50">
-              <div className="flex items-center justify-center gap-4 text-sm text-slate-400">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                  <span>Voice Active</span>
+              {conversationEntries.length === 0 ? (
+                <div className="flex-1 flex items-center justify-center">
+                  <div className="text-center">
+                    <MessageCircle className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+                    <p className="text-slate-500 text-sm italic">
+                      Start speaking to see the conversation here
+                    </p>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                  <span>AI Listening</span>
+              ) : (
+                <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+                  {conversationEntries.map((entry, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-3 rounded-lg ${
+                        entry.role === 'user'
+                          ? 'bg-blue-500/20 border border-blue-500/30'
+                          : 'bg-slate-700/40 border border-slate-600/30'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`text-xs font-semibold ${
+                          entry.role === 'user' ? 'text-blue-400' : 'text-emerald-400'
+                        }`}>
+                          {entry.role === 'user' ? 'You' : 'Assistant'}
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          {entry.timestamp.toLocaleTimeString()}
+                        </span>
+                      </div>
+                      <p className="text-sm text-slate-200 leading-relaxed">{entry.text}</p>
+                    </div>
+                  ))}
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
-                  <span>Real-time</span>
+              )}
+            </div>
+
+            <div className="flex-1"></div>
+
+            <div className="w-80 bg-slate-800/40 backdrop-blur-xl rounded-2xl p-6 border border-white/10 shadow-2xl flex flex-col h-full">
+              <div className="mb-4">
+                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5" />
+                  Interpretation
+                </h2>
+                <p className="text-sm text-slate-400 mt-1">Real-time analysis</p>
+              </div>
+
+              {conversationEntries.length === 0 ? (
+                <div className="flex-1 flex flex-col items-center justify-center text-center">
+                  <TrendingUp className="w-12 h-12 text-slate-600 mb-3" />
+                  <p className="text-slate-500 text-sm italic">
+                    Analysis will appear here during conversation
+                  </p>
                 </div>
+              ) : (
+                <div className="flex-1 space-y-6 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+                  {analysis.sentiment && (
+                    <div className="bg-slate-700/40 rounded-lg p-4 border border-slate-600/30">
+                      <h3 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">
+                        Sentiment
+                      </h3>
+                      <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium ${
+                        analysis.sentiment === 'positive'
+                          ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                          : analysis.sentiment === 'negative'
+                          ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                          : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                      }`}>
+                        <div className={`w-2 h-2 rounded-full ${
+                          analysis.sentiment === 'positive'
+                            ? 'bg-green-400'
+                            : analysis.sentiment === 'negative'
+                            ? 'bg-red-400'
+                            : 'bg-blue-400'
+                        }`}></div>
+                        {analysis.sentiment.charAt(0).toUpperCase() + analysis.sentiment.slice(1)}
+                      </div>
+                    </div>
+                  )}
+
+                  {analysis.intent && (
+                    <div className="bg-slate-700/40 rounded-lg p-4 border border-slate-600/30">
+                      <h3 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">
+                        Intent
+                      </h3>
+                      <p className="text-sm text-slate-200">{analysis.intent}</p>
+                    </div>
+                  )}
+
+                  {analysis.topics && analysis.topics.length > 0 && (
+                    <div className="bg-slate-700/40 rounded-lg p-4 border border-slate-600/30">
+                      <h3 className="text-xs font-semibold text-slate-400 mb-3 uppercase tracking-wider">
+                        Topics Detected
+                      </h3>
+                      <div className="flex flex-wrap gap-2">
+                        {analysis.topics.map((topic, idx) => (
+                          <span
+                            key={idx}
+                            className="px-3 py-1 bg-cyan-500/20 text-cyan-300 text-xs font-medium rounded-full border border-cyan-500/30"
+                          >
+                            {topic}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {analysis.keyPoints && analysis.keyPoints.length > 0 && (
+                    <div className="bg-slate-700/40 rounded-lg p-4 border border-slate-600/30">
+                      <h3 className="text-xs font-semibold text-slate-400 mb-3 uppercase tracking-wider">
+                        Key Points
+                      </h3>
+                      <ul className="space-y-2">
+                        {analysis.keyPoints.map((point, idx) => (
+                          <li key={idx} className="flex items-start gap-2 text-sm text-slate-300">
+                            <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-1.5 flex-shrink-0"></div>
+                            <span>{point}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {isInitialized && (
+        <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-20 bg-slate-900/80 backdrop-blur-sm px-6 py-3 rounded-full border border-slate-700">
+          {isSpeaking ? (
+            <div className="flex items-center gap-3">
+              <div className="flex gap-1">
+                <div className="w-1 h-4 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0ms' }}></div>
+                <div className="w-1 h-4 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></div>
+                <div className="w-1 h-4 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></div>
+              </div>
+              <span className="text-sm text-slate-300 font-medium">Processing...</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-4 text-sm text-slate-400">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <span>Voice Active</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                <span>AI Listening</span>
               </div>
             </div>
           )}
         </div>
+      )}
 
-        <div className="lg:col-span-3 bg-slate-800/60 backdrop-blur-lg rounded-2xl p-6 border border-slate-700/50 overflow-hidden flex flex-col">
-          <div className="mb-4">
-            <h2 className="text-xl font-bold text-white flex items-center gap-2">
-              <BarChart3 className="w-5 h-5 text-purple-400" />
-              Interpretation
-            </h2>
-            <p className="text-sm text-slate-400 mt-1">Real-time analysis</p>
-          </div>
-
-          {conversationEntries.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-center">
-              <BarChart3 className="w-16 h-16 text-slate-600 mb-4" />
-              <p className="text-slate-500 text-sm italic">
-                Analysis will appear here during conversation
-              </p>
-            </div>
-          ) : (
-            <div className="flex-1 space-y-6">
-              {analysis.sentiment && (
-                <div className="bg-slate-700/40 rounded-lg p-4 border border-slate-600/30">
-                  <h3 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">
-                    Sentiment
-                  </h3>
-                  <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium ${
-                    analysis.sentiment === 'positive'
-                      ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-                      : analysis.sentiment === 'negative'
-                      ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                      : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                  }`}>
-                    <div className={`w-2 h-2 rounded-full ${
-                      analysis.sentiment === 'positive'
-                        ? 'bg-green-400'
-                        : analysis.sentiment === 'negative'
-                        ? 'bg-red-400'
-                        : 'bg-blue-400'
-                    }`}></div>
-                    {analysis.sentiment.charAt(0).toUpperCase() + analysis.sentiment.slice(1)}
-                  </div>
-                </div>
-              )}
-
-              {analysis.intent && (
-                <div className="bg-slate-700/40 rounded-lg p-4 border border-slate-600/30">
-                  <h3 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">
-                    Intent
-                  </h3>
-                  <p className="text-sm text-slate-200">{analysis.intent}</p>
-                </div>
-              )}
-
-              {analysis.topics && analysis.topics.length > 0 && (
-                <div className="bg-slate-700/40 rounded-lg p-4 border border-slate-600/30">
-                  <h3 className="text-xs font-semibold text-slate-400 mb-3 uppercase tracking-wider">
-                    Topics Detected
-                  </h3>
-                  <div className="flex flex-wrap gap-2">
-                    {analysis.topics.map((topic, idx) => (
-                      <span
-                        key={idx}
-                        className="px-3 py-1 bg-purple-500/20 text-purple-300 text-xs font-medium rounded-full border border-purple-500/30"
-                      >
-                        {topic}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {analysis.keyPoints && analysis.keyPoints.length > 0 && (
-                <div className="bg-slate-700/40 rounded-lg p-4 border border-slate-600/30">
-                  <h3 className="text-xs font-semibold text-slate-400 mb-3 uppercase tracking-wider">
-                    Key Points
-                  </h3>
-                  <ul className="space-y-2">
-                    {analysis.keyPoints.map((point, idx) => (
-                      <li key={idx} className="flex items-start gap-2 text-sm text-slate-300">
-                        <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-1.5 flex-shrink-0"></div>
-                        <span>{point}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="fixed bottom-4 right-4 text-xs text-slate-500 flex items-center gap-2">
+      <div className="fixed bottom-4 right-4 text-xs text-white/40 flex items-center gap-2 z-10">
         <span className="opacity-60">Powered by</span>
-        <span className="font-semibold text-slate-400">HeyGen</span>
+        <span className="font-semibold text-white/60">HeyGen</span>
       </div>
     </div>
   );

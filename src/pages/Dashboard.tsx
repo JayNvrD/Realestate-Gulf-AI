@@ -120,7 +120,7 @@ export default function Dashboard() {
           change="3-9 month outlook"
           changeType="neutral"
           icon={TrendingUp}
-          iconColor="bg-gradient-to-br from-blue-500 to-indigo-600"
+          iconColor="bg-gradient-to-br from-blue-500 to-cyan-600"
         />
         <KPI
           title="Closed Deals"

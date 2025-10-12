@@ -21,7 +21,7 @@ export default function LeadTable({ leads, onSelectLead }: LeadTableProps) {
     const colors = {
       New: 'bg-cyan-100 text-cyan-700',
       Qualified: 'bg-blue-100 text-blue-700',
-      'Site Visit': 'bg-indigo-100 text-indigo-700',
+      'Site Visit': 'bg-teal-100 text-teal-700',
       Negotiation: 'bg-amber-100 text-amber-700',
       Closed: 'bg-emerald-100 text-emerald-700',
       Lost: 'bg-gray-100 text-gray-700',
