@@ -15,11 +15,14 @@ export class OpenAIAssistantService {
 
   async sendMessage(message: string): Promise<string> {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
     const response = await fetch(`${supabaseUrl}/functions/v1/openai-assistant`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+        'apikey': supabaseAnonKey,
       },
       body: JSON.stringify({
         message,
