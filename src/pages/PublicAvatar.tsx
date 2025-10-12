@@ -37,8 +37,23 @@ class DeepgramSTTService {
 
     console.log('[DeepgramSTT] Fetching Deepgram key via Supabase...');
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const response = await fetch(`${supabaseUrl}/functions/v1/deepgram-token`);
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+    const response = await fetch(`${supabaseUrl}/functions/v1/deepgram-token`, {
+      headers: {
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[DeepgramSTT] Failed to fetch key:', response.status, errorText);
+      throw new Error(`Failed to fetch Deepgram key: ${response.status}`);
+    }
+
     const { key } = await response.json();
+    console.log('[DeepgramSTT] Key retrieved successfully');
 
     console.log('[DeepgramSTT] Opening Deepgram WebSocket...');
     this.socket = new WebSocket(

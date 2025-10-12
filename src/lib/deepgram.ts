@@ -17,11 +17,18 @@ export class DeepgramSTTService {
     this.source.connect(this.processor);
     this.processor.connect(this.audioContext.destination);
 
-    // ✅ Fetch Deepgram key from your Supabase Edge Function (no auth needed now)
+    // ✅ Fetch Deepgram key from your Supabase Edge Function
     console.log('[DeepgramSTT] Fetching Deepgram key via Supabase...');
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-    const res = await fetch(`${supabaseUrl}/functions/v1/deepgram-token`);
+    const res = await fetch(`${supabaseUrl}/functions/v1/deepgram-token`, {
+      headers: {
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
     if (!res.ok) {
       const text = await res.text();
       console.error('[DeepgramSTT] Failed to fetch key:', res.status, text);
