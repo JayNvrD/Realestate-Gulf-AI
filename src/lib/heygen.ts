@@ -1,3 +1,6 @@
+// ✅ Fixed Version of heygen.ts
+// This version adds the required Authorization header to resolve the 401 "Missing authorization header" error
+
 import StreamingAvatar, {
   AvatarQuality,
   StreamingEvents,
@@ -16,12 +19,19 @@ export class HeyGenAvatarService {
       this.videoElement = videoElement;
 
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      if (!supabaseUrl) {
-        throw new Error('VITE_SUPABASE_URL environment variable is not set');
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error('Supabase environment variables are not properly set');
       }
 
       console.log('[HeyGen] Fetching access token from backend...');
-      const tokenResponse = await fetch(`${supabaseUrl}/functions/v1/heygen-token`);
+      const tokenResponse = await fetch(`${supabaseUrl}/functions/v1/heygen-token`, {
+        headers: {
+          Authorization: `Bearer ${supabaseAnonKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
 
       if (!tokenResponse.ok) {
         const errorText = await tokenResponse.text();
