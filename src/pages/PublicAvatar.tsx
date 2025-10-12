@@ -4,13 +4,87 @@ import { supabase } from '../lib/supabase';
 import { PublicLink, AIAvatar } from '../types/db';
 import { HeyGenAvatarService } from '../lib/heygen';
 import { OpenAIAssistantService } from '../lib/openai';
-import { DeepgramSTTService } from '../lib/deepgram';
 import { MessageCircle, Loader, X } from 'lucide-react';
 
 interface ConversationEntry {
   role: 'user' | 'assistant';
   text: string;
   timestamp: Date;
+}
+
+// Deepgram STT Service — Fetches key via Supabase Function
+class DeepgramSTTService {
+  private socket: WebSocket | null = null;
+  private audioContext: AudioContext | null = null;
+  private mediaStream: MediaStream | null = null;
+  private source: MediaStreamAudioSourceNode | null = null;
+  private processor: ScriptProcessorNode | null = null;
+  private onTranscriptionCallback?: (text: string) => void;
+
+  constructor() {}
+
+  async startListening(onTranscription: (text: string) => void) {
+    this.onTranscriptionCallback = onTranscription;
+
+    console.log('[DeepgramSTT] Requesting microphone access...');
+    this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    this.audioContext = new AudioContext();
+    this.source = this.audioContext.createMediaStreamSource(this.mediaStream);
+    this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
+
+    this.source.connect(this.processor);
+    this.processor.connect(this.audioContext.destination);
+
+    console.log('[DeepgramSTT] Fetching Deepgram key via Supabase...');
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const response = await fetch(`${supabaseUrl}/functions/v1/deepgram-token`);
+    const { key } = await response.json();
+
+    console.log('[DeepgramSTT] Opening Deepgram WebSocket...');
+    this.socket = new WebSocket(
+      'wss://api.deepgram.com/v1/listen?model=general&language=en-US&punctuate=true',
+      ['token', key]
+    );
+
+    this.socket.onopen = () => console.log('[DeepgramSTT] Connected to Deepgram');
+    this.socket.onerror = (err) => console.error('[DeepgramSTT] WebSocket error:', err);
+    this.socket.onclose = () => console.log('[DeepgramSTT] Connection closed');
+
+    this.socket.onmessage = (message) => {
+      const data = JSON.parse(message.data);
+      const transcript = data.channel?.alternatives?.[0]?.transcript;
+      if (transcript && this.onTranscriptionCallback) {
+        this.onTranscriptionCallback(transcript);
+      }
+    };
+
+    this.processor.onaudioprocess = (event) => {
+      if (this.socket?.readyState !== WebSocket.OPEN) return;
+      const inputData = event.inputBuffer.getChannelData(0);
+      const int16Data = this.floatTo16BitPCM(inputData);
+      this.socket.send(int16Data);
+    };
+  }
+
+  private floatTo16BitPCM(float32Array: Float32Array) {
+    const buffer = new ArrayBuffer(float32Array.length * 2);
+    const view = new DataView(buffer);
+    let offset = 0;
+    for (let i = 0; i < float32Array.length; i++, offset += 2) {
+      const s = Math.max(-1, Math.min(1, float32Array[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    }
+    return buffer;
+  }
+
+  stopListening() {
+    console.log('[DeepgramSTT] Stopping...');
+    this.processor?.disconnect();
+    this.source?.disconnect();
+    this.mediaStream?.getTracks().forEach((t) => t.stop());
+    this.socket?.close();
+    this.audioContext?.close();
+  }
 }
 
 export default function PublicAvatar() {
@@ -78,8 +152,6 @@ export default function PublicAvatar() {
   };
 
   const initializeAvatar = async () => {
-    console.log('[PublicAvatar] initializeAvatar called');
-
     if (!link || !avatar || !videoRef.current) {
       setError('Configuration missing or video element not ready');
       return;
@@ -87,20 +159,14 @@ export default function PublicAvatar() {
 
     try {
       setIsConnecting(true);
-      setError('');
-
       avatarServiceRef.current = new HeyGenAvatarService();
       openaiServiceRef.current = new OpenAIAssistantService();
       openaiServiceRef.current.setSystemPrompt(avatar.system_prompt);
 
-      console.log('[PublicAvatar] Initializing HeyGen avatar...');
       await avatarServiceRef.current.initialize(videoRef.current, avatar.heygen_avatar_id);
       console.log('[PublicAvatar] HeyGen avatar initialized successfully');
 
-      // ✅ Deepgram STT
-      const deepgramKey = import.meta.env.VITE_DEEPGRAM_API_KEY;
-      deepgramRef.current = new DeepgramSTTService(deepgramKey);
-
+      deepgramRef.current = new DeepgramSTTService();
       await deepgramRef.current.startListening(async (transcript) => {
         if (!transcript.trim()) return;
         console.log('[Deepgram STT] Transcript:', transcript);
@@ -119,7 +185,6 @@ export default function PublicAvatar() {
 
   const handleUserMessage = async (message: string) => {
     if (!avatarServiceRef.current || !openaiServiceRef.current || !message.trim() || isSpeaking) return;
-
     try {
       setIsSpeaking(true);
       const userEntry: ConversationEntry = { role: 'user', text: message, timestamp: new Date() };
@@ -201,34 +266,22 @@ export default function PublicAvatar() {
 
       <div className="relative z-10 w-full h-full flex items-center justify-center p-6">
         {!isInitialized ? (
-          <div className="text-center">
-            {isConnecting ? (
-              <div className="text-center">
-                <div className="relative w-24 h-24 mx-auto mb-6">
-                  <div className="absolute inset-0 rounded-full border-4 border-white/30"></div>
-                  <div className="absolute inset-0 rounded-full border-4 border-t-white animate-spin"></div>
-                </div>
-                <p className="text-white text-xl font-medium animate-pulse">Connecting...</p>
-              </div>
-            ) : (
-              <div className="text-center px-6">
-                <div className="w-32 h-32 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-full flex items-center justify-center mx-auto mb-8 shadow-2xl shadow-blue-500/50">
-                  <MessageCircle className="w-16 h-16 text-white" />
-                </div>
-                <h2 className="text-3xl font-bold text-white mb-3">{link.title}</h2>
-                <p className="text-slate-300 text-lg mb-2 max-w-md mx-auto">{avatar.name}</p>
-                <p className="text-slate-400 text-sm mb-8 max-w-md mx-auto">
-                  Start speaking to interact with your AI assistant
-                </p>
-                <button
-                  onClick={initializeAvatar}
-                  disabled={loading || isConnecting}
-                  className="px-10 py-4 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-xl text-lg font-semibold hover:shadow-2xl hover:shadow-blue-500/50 transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Start Conversation
-                </button>
-              </div>
-            )}
+          <div className="text-center px-6">
+            <div className="w-32 h-32 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-full flex items-center justify-center mx-auto mb-8 shadow-2xl shadow-blue-500/50">
+              <MessageCircle className="w-16 h-16 text-white" />
+            </div>
+            <h2 className="text-3xl font-bold text-white mb-3">{link.title}</h2>
+            <p className="text-slate-300 text-lg mb-2 max-w-md mx-auto">{avatar.name}</p>
+            <p className="text-slate-400 text-sm mb-8 max-w-md mx-auto">
+              Start speaking to interact with your AI assistant
+            </p>
+            <button
+              onClick={initializeAvatar}
+              disabled={loading || isConnecting}
+              className="px-10 py-4 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-xl text-lg font-semibold hover:shadow-2xl hover:shadow-blue-500/50 transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Start Conversation
+            </button>
           </div>
         ) : (
           <div className="fixed left-6 top-6 bottom-6 w-96 bg-slate-800/40 backdrop-blur-xl rounded-2xl p-6 border border-white/10 shadow-2xl flex flex-col">
@@ -239,43 +292,33 @@ export default function PublicAvatar() {
               </h2>
               <p className="text-sm text-slate-400 mt-1">Live transcript</p>
             </div>
-
-            {conversationEntries.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center">
-                <div className="text-center">
-                  <MessageCircle className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-                  <p className="text-slate-500 text-sm italic">Speak to begin your conversation</p>
-                </div>
-              </div>
-            ) : (
-              <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
-                {conversationEntries.map((entry, idx) => (
-                  <div
-                    key={idx}
-                    className={`p-3 rounded-lg ${
-                      entry.role === 'user'
-                        ? 'bg-blue-500/20 border border-blue-500/30'
-                        : 'bg-slate-700/40 border border-slate-600/30'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <span
-                        className={`text-xs font-semibold ${
-                          entry.role === 'user' ? 'text-blue-400' : 'text-emerald-400'
-                        }`}
-                      >
-                        {entry.role === 'user' ? 'You' : 'Assistant'}
-                      </span>
-                      <span className="text-xs text-slate-500">
-                        {entry.timestamp.toLocaleTimeString()}
-                      </span>
-                    </div>
-                    <p className="text-sm text-slate-200 leading-relaxed">{entry.text}</p>
+            <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+              {conversationEntries.map((entry, idx) => (
+                <div
+                  key={idx}
+                  className={`p-3 rounded-lg ${
+                    entry.role === 'user'
+                      ? 'bg-blue-500/20 border border-blue-500/30'
+                      : 'bg-slate-700/40 border border-slate-600/30'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span
+                      className={`text-xs font-semibold ${
+                        entry.role === 'user' ? 'text-blue-400' : 'text-emerald-400'
+                      }`}
+                    >
+                      {entry.role === 'user' ? 'You' : 'Assistant'}
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      {entry.timestamp.toLocaleTimeString()}
+                    </span>
                   </div>
-                ))}
-                <div ref={conversationEndRef} />
-              </div>
-            )}
+                  <p className="text-sm text-slate-200 leading-relaxed">{entry.text}</p>
+                </div>
+              ))}
+              <div ref={conversationEndRef} />
+            </div>
           </div>
         )}
       </div>
@@ -285,9 +328,9 @@ export default function PublicAvatar() {
           {isSpeaking ? (
             <div className="flex items-center gap-3">
               <div className="flex gap-1">
-                <div className="w-1 h-4 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0ms' }}></div>
-                <div className="w-1 h-4 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></div>
-                <div className="w-1 h-4 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></div>
+                <div className="w-1 h-4 bg-blue-400 rounded-full animate-pulse"></div>
+                <div className="w-1 h-4 bg-blue-400 rounded-full animate-pulse delay-150"></div>
+                <div className="w-1 h-4 bg-blue-400 rounded-full animate-pulse delay-300"></div>
               </div>
               <span className="text-sm text-slate-300 font-medium">Processing...</span>
             </div>
