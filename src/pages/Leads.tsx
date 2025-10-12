@@ -171,6 +171,7 @@ export default function Leads() {
         activities={leadActivities}
         onClose={() => setSelectedLead(null)}
         onAddActivity={handleAddActivity}
+        onLeadUpdated={loadLeads}
       />
     </div>
   );
