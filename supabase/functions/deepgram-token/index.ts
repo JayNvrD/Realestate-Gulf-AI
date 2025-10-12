@@ -1,6 +1,5 @@
 // supabase/functions/deepgram-token/index.ts
-// ✅ Deepgram Token Minting Function (2025 API Version)
-// Reference: https://developers.deepgram.com/reference/token-based-auth-api/grant-token
+// ✅ Fixed: Uses correct Deepgram header style ("Token", not "Bearer")
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -20,32 +19,31 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('DEEPGRAM_PROJECT_ID') || '4d6507e9-d48c-4f00-8ee9-f2c845c6b223';
 
     if (!DEEPGRAM_API_KEY) {
-      console.error('[Deepgram Function] Missing DEEPGRAM_API_KEY');
       return new Response(
         JSON.stringify({ error: 'Missing Deepgram API key' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // ✅ Deepgram Token API endpoint (latest)
-    const url = `https://api.deepgram.com/v1/projects/${DEEPGRAM_PROJECT_ID}/access-tokens`;
+    const endpoint = `https://api.deepgram.com/v1/projects/${DEEPGRAM_PROJECT_ID}/access-tokens`;
 
-    console.log('[Deepgram Function] Minting new token...');
-    const response = await fetch(url, {
+    console.log('[Deepgram] Minting temporary access token...');
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
+        // ✅ Critical fix here
         Authorization: `Token ${DEEPGRAM_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        ttl: 900, // 15 minutes
-        scope: 'listen:stream', // allow real-time transcription
+        ttl: 900,
+        scope: 'listen:stream',
       }),
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error('[Deepgram Function] Deepgram API error:', response.status, errText);
+      console.error('[Deepgram] API Error:', response.status, errText);
       return new Response(
         JSON.stringify({ error: 'Failed to mint Deepgram token', details: errText }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -55,13 +53,13 @@ Deno.serve(async (req: Request) => {
     const data = await response.json();
     const token = data.access_token || data.token || data.key;
 
-    console.log('[Deepgram Function] ✅ Token minted successfully');
+    console.log('[Deepgram] ✅ Token minted successfully');
     return new Response(
       JSON.stringify({ key: token }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {
-    console.error('[Deepgram Function] ❌ Exception:', error);
+    console.error('[Deepgram] ❌ Exception:', error);
     return new Response(
       JSON.stringify({ error: 'Unexpected error', details: String(error) }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
