@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { PublicLink, AIAvatar } from '../types/db';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, Copy, Eye, Edit, Trash2, Link as LinkIcon } from 'lucide-react';
+import { Plus, Copy, Eye, Edit, Trash2, Link as LinkIcon, X } from 'lucide-react';
 
 export default function Links() {
   const { user } = useAuth();
@@ -18,6 +18,7 @@ export default function Links() {
     rateLimitPerMin: 10,
   });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     loadData();
@@ -25,6 +26,7 @@ export default function Links() {
 
   const loadData = async () => {
     try {
+      setError('');
       const [linksRes, avatarsRes] = await Promise.all([
         supabase.from('public_links').select('*').order('created_at', { ascending: false }),
         supabase.from('ai_avatars').select('*').eq('is_active', true).order('created_at', { ascending: false }),
@@ -35,8 +37,9 @@ export default function Links() {
 
       setLinks(linksRes.data || []);
       setAvatars(avatarsRes.data || []);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading data:', error);
+      setError(error.message || 'Failed to load data');
     } finally {
       setLoading(false);
     }
@@ -152,7 +155,10 @@ export default function Links() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <div className="text-gray-600">Loading...</div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-600 mx-auto mb-4"></div>
+          <div className="text-gray-600">Loading public links...</div>
+        </div>
       </div>
     );
   }
@@ -162,7 +168,10 @@ export default function Links() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Public Links</h1>
-          <p className="text-gray-600">Create shareable links for your AI avatars</p>
+          <p className="text-gray-600">
+            Create shareable links for your AI avatars
+            {links.length > 0 && <span className="ml-2 text-cyan-600 font-semibold">({links.length} link{links.length !== 1 ? 's' : ''})</span>}
+          </p>
         </div>
         <button
           onClick={() => setShowForm(!showForm)}
@@ -173,7 +182,23 @@ export default function Links() {
         </button>
       </div>
 
-      {avatars.length === 0 && (
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+          <X className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <h4 className="text-sm font-semibold text-red-800 mb-1">Error Loading Data</h4>
+            <p className="text-sm text-red-600">{error}</p>
+            <button
+              onClick={loadData}
+              className="mt-2 text-sm text-red-700 hover:text-red-800 font-medium underline"
+            >
+              Try again
+            </button>
+          </div>
+        </div>
+      )}
+
+      {avatars.length === 0 && !error && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
           <p className="text-yellow-800 text-sm">
             No active avatars found. Please create an avatar first in the AI Avatars page.
@@ -213,22 +238,28 @@ export default function Links() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">AI Avatar</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                AI Avatar
+                <span className="ml-2 text-xs text-gray-500">({avatars.length} available)</span>
+              </label>
               <select
                 value={formData.avatarId}
                 onChange={(e) => setFormData({ ...formData, avatarId: e.target.value })}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
                 required
+                disabled={avatars.length === 0}
               >
-                <option value="">Select an avatar...</option>
+                <option value="">
+                  {avatars.length === 0 ? 'No active avatars available' : 'Select an avatar...'}
+                </option>
                 {avatars.map((avatar) => (
                   <option key={avatar.id} value={avatar.id}>
-                    {avatar.name}
+                    {avatar.name} ({avatar.heygen_avatar_id})
                   </option>
                 ))}
               </select>
               <p className="mt-1 text-xs text-gray-500">
-                The avatar's system prompt will be used for this link
+                The avatar's system prompt will be used for this link. Only active avatars are shown.
               </p>
             </div>
 

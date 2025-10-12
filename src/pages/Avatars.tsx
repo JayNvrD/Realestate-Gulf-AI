@@ -15,6 +15,7 @@ export default function Avatars() {
     system_prompt: '',
   });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     loadAvatars();
@@ -22,6 +23,7 @@ export default function Avatars() {
 
   const loadAvatars = async () => {
     try {
+      setError('');
       const { data, error } = await supabase
         .from('ai_avatars')
         .select('*')
@@ -29,8 +31,9 @@ export default function Avatars() {
 
       if (error) throw error;
       setAvatars(data || []);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading avatars:', error);
+      setError(error.message || 'Failed to load avatars');
     } finally {
       setLoading(false);
     }
@@ -187,7 +190,10 @@ Strict Rules:
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <div className="text-gray-600">Loading avatars...</div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-600 mx-auto mb-4"></div>
+          <div className="text-gray-600">Loading avatars...</div>
+        </div>
       </div>
     );
   }
@@ -197,7 +203,10 @@ Strict Rules:
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">AI Avatars</h1>
-          <p className="text-gray-600">Create and manage AI avatar configurations with custom prompts</p>
+          <p className="text-gray-600">
+            Create and manage AI avatar configurations with custom prompts
+            {avatars.length > 0 && <span className="ml-2 text-cyan-600 font-semibold">({avatars.length} avatar{avatars.length !== 1 ? 's' : ''})</span>}
+          </p>
         </div>
         <button
           onClick={() => setShowForm(!showForm)}
@@ -207,6 +216,22 @@ Strict Rules:
           Create Avatar
         </button>
       </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+          <X className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <h4 className="text-sm font-semibold text-red-800 mb-1">Error Loading Avatars</h4>
+            <p className="text-sm text-red-600">{error}</p>
+            <button
+              onClick={loadAvatars}
+              className="mt-2 text-sm text-red-700 hover:text-red-800 font-medium underline"
+            >
+              Try again
+            </button>
+          </div>
+        </div>
+      )}
 
       {showForm && (
         <div className="bg-white rounded-2xl border border-gray-200 p-6">
