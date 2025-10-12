@@ -1,5 +1,5 @@
 // supabase/functions/deepgram-token/index.ts
-// ✅ Secure Supabase Edge Function for minting temporary Deepgram tokens
+// ✅ Fixed: uses correct Deepgram token creation endpoint and handles errors cleanly.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -15,20 +15,22 @@ Deno.serve(async (req: Request) => {
   try {
     const DEEPGRAM_API_KEY = Deno.env.get('DEEPGRAM_API_KEY');
     if (!DEEPGRAM_API_KEY) {
-      throw new Error('Missing DEEPGRAM_API_KEY in environment');
+      console.error('Missing DEEPGRAM_API_KEY in environment');
+      return new Response(
+        JSON.stringify({ error: 'Missing Deepgram API key in environment' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
-    // 🔐 Request temporary Deepgram access token
-    const response = await fetch('https://api.deepgram.com/v1/projects/me/keys', {
+    // ✅ Correct Deepgram endpoint for token creation
+    const response = await fetch('https://api.deepgram.com/v1/listen/auth', {
       method: 'POST',
       headers: {
         Authorization: `Token ${DEEPGRAM_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        comment: 'SupabaseTemporaryToken',
-        scopes: ['usage:write', 'usage:read'],
-        time_to_live: 900, // 15 minutes
+        ttl: 900, // 15 minutes
       }),
     });
 
@@ -42,16 +44,16 @@ Deno.serve(async (req: Request) => {
     }
 
     const data = await response.json();
-    const token = data?.key || data?.token;
+    const token = data?.access_token || data?.key || data?.token;
 
-    return new Response(
-      JSON.stringify({ token }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
-  } catch (error: any) {
+    return new Response(JSON.stringify({ token }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  } catch (error) {
     console.error('Deepgram token exception:', error);
     return new Response(
-      JSON.stringify({ error: 'Token mint error' }),
+      JSON.stringify({ error: 'Token mint error', details: String(error) }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
