@@ -1,39 +1,42 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { PublicLink } from '../types/db';
+import { PublicLink, AIAvatar } from '../types/db';
 import { useAuth } from '../contexts/AuthContext';
 import { Plus, Copy, Eye, Edit, Trash2, Link as LinkIcon } from 'lucide-react';
 
 export default function Links() {
   const { user } = useAuth();
   const [links, setLinks] = useState<PublicLink[]>([]);
+  const [avatars, setAvatars] = useState<AIAvatar[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     slug: '',
     title: '',
-    assistantPrompt: '',
+    avatarId: '',
     model: 'gpt-4o-mini',
-    avatarName: 'Estate Buddy',
-    voice: 'en-US-JennyNeural',
     rateLimitPerMin: 10,
   });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadLinks();
+    loadData();
   }, []);
 
-  const loadLinks = async () => {
+  const loadData = async () => {
     try {
-      const { data, error } = await supabase
-        .from('public_links')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const [linksRes, avatarsRes] = await Promise.all([
+        supabase.from('public_links').select('*').order('created_at', { ascending: false }),
+        supabase.from('ai_avatars').select('*').eq('is_active', true).order('created_at', { ascending: false }),
+      ]);
 
-      if (error) throw error;
-      setLinks(data || []);
+      if (linksRes.error) throw linksRes.error;
+      if (avatarsRes.error) throw avatarsRes.error;
+
+      setLinks(linksRes.data || []);
+      setAvatars(avatarsRes.data || []);
     } catch (error) {
-      console.error('Error loading links:', error);
+      console.error('Error loading data:', error);
     } finally {
       setLoading(false);
     }
@@ -44,37 +47,56 @@ export default function Links() {
     if (!user) return;
 
     try {
-      const { error } = await supabase.from('public_links').insert({
-        slug: formData.slug,
-        title: formData.title,
-        is_enabled: true,
-        config: {
-          assistantPrompt: formData.assistantPrompt,
-          model: formData.model,
-          avatarName: formData.avatarName,
-          voice: formData.voice,
-        },
-        rate_limit_per_min: formData.rateLimitPerMin,
-        created_by: user.id,
-      });
+      if (editingId) {
+        const { error } = await supabase
+          .from('public_links')
+          .update({
+            slug: formData.slug,
+            title: formData.title,
+            avatar_id: formData.avatarId || null,
+            config: {
+              model: formData.model,
+            },
+            rate_limit_per_min: formData.rateLimitPerMin,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', editingId);
 
-      if (error) throw error;
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('public_links').insert({
+          slug: formData.slug,
+          title: formData.title,
+          is_enabled: true,
+          avatar_id: formData.avatarId || null,
+          config: {
+            model: formData.model,
+          },
+          rate_limit_per_min: formData.rateLimitPerMin,
+          created_by: user.id,
+        });
 
-      setShowForm(false);
-      setFormData({
-        slug: '',
-        title: '',
-        assistantPrompt: '',
-        model: 'gpt-4o-mini',
-        avatarName: 'Estate Buddy',
-        voice: 'en-US-JennyNeural',
-        rateLimitPerMin: 10,
-      });
-      loadLinks();
+        if (error) throw error;
+      }
+
+      resetForm();
+      loadData();
     } catch (error) {
-      console.error('Error creating link:', error);
-      alert('Error creating link. Please check the slug is unique.');
+      console.error('Error saving link:', error);
+      alert('Error saving link. Please check the slug is unique.');
     }
+  };
+
+  const handleEdit = (link: PublicLink) => {
+    setEditingId(link.id);
+    setFormData({
+      slug: link.slug,
+      title: link.title,
+      avatarId: link.avatar_id || '',
+      model: link.config.model || 'gpt-4o-mini',
+      rateLimitPerMin: link.rate_limit_per_min,
+    });
+    setShowForm(true);
   };
 
   const handleToggleEnabled = async (id: string, currentState: boolean) => {
@@ -85,7 +107,7 @@ export default function Links() {
         .eq('id', id);
 
       if (error) throw error;
-      loadLinks();
+      loadData();
     } catch (error) {
       console.error('Error toggling link:', error);
     }
@@ -97,7 +119,7 @@ export default function Links() {
     try {
       const { error } = await supabase.from('public_links').delete().eq('id', id);
       if (error) throw error;
-      loadLinks();
+      loadData();
     } catch (error) {
       console.error('Error deleting link:', error);
     }
@@ -109,10 +131,28 @@ export default function Links() {
     alert('Link copied to clipboard!');
   };
 
+  const resetForm = () => {
+    setShowForm(false);
+    setEditingId(null);
+    setFormData({
+      slug: '',
+      title: '',
+      avatarId: '',
+      model: 'gpt-4o-mini',
+      rateLimitPerMin: 10,
+    });
+  };
+
+  const getAvatarName = (avatarId: string | null) => {
+    if (!avatarId) return 'No avatar';
+    const avatar = avatars.find(a => a.id === avatarId);
+    return avatar ? avatar.name : 'Unknown avatar';
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <div className="text-gray-600">Loading links...</div>
+        <div className="text-gray-600">Loading...</div>
       </div>
     );
   }
@@ -121,8 +161,8 @@ export default function Links() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">AI Avatar</h1>
-          <p className="text-gray-600">Create and manage shareable avatar links</p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Public Links</h1>
+          <p className="text-gray-600">Create shareable links for your AI avatars</p>
         </div>
         <button
           onClick={() => setShowForm(!showForm)}
@@ -133,9 +173,19 @@ export default function Links() {
         </button>
       </div>
 
+      {avatars.length === 0 && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <p className="text-yellow-800 text-sm">
+            No active avatars found. Please create an avatar first in the AI Avatars page.
+          </p>
+        </div>
+      )}
+
       {showForm && (
         <div className="bg-white rounded-2xl border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Create New Public Link</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            {editingId ? 'Edit Public Link' : 'Create New Public Link'}
+          </h3>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -163,17 +213,26 @@ export default function Links() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Assistant Prompt</label>
-              <textarea
-                value={formData.assistantPrompt}
-                onChange={(e) => setFormData({ ...formData, assistantPrompt: e.target.value })}
-                placeholder="You are Estate Buddy, a helpful real estate assistant..."
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent resize-none"
-                rows={3}
-              />
+              <label className="block text-sm font-medium text-gray-700 mb-1">AI Avatar</label>
+              <select
+                value={formData.avatarId}
+                onChange={(e) => setFormData({ ...formData, avatarId: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+                required
+              >
+                <option value="">Select an avatar...</option>
+                {avatars.map((avatar) => (
+                  <option key={avatar.id} value={avatar.id}>
+                    {avatar.name}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-gray-500">
+                The avatar's system prompt will be used for this link
+              </p>
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
                 <select
@@ -185,15 +244,6 @@ export default function Links() {
                   <option value="gpt-4o">GPT-4o</option>
                   <option value="gpt-4-turbo">GPT-4 Turbo</option>
                 </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Avatar Name</label>
-                <input
-                  type="text"
-                  value={formData.avatarName}
-                  onChange={(e) => setFormData({ ...formData, avatarName: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
-                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Rate Limit/Min</label>
@@ -212,11 +262,11 @@ export default function Links() {
                 type="submit"
                 className="px-6 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-white rounded-lg hover:shadow-lg transition-all"
               >
-                Create Link
+                {editingId ? 'Update Link' : 'Create Link'}
               </button>
               <button
                 type="button"
-                onClick={() => setShowForm(false)}
+                onClick={resetForm}
                 className="px-6 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
               >
                 Cancel
@@ -262,12 +312,12 @@ export default function Links() {
 
                   <div className="grid grid-cols-3 gap-4 text-sm">
                     <div>
-                      <p className="text-gray-600">Model</p>
-                      <p className="font-medium text-gray-900">{link.config.model || 'gpt-4o-mini'}</p>
+                      <p className="text-gray-600">Avatar</p>
+                      <p className="font-medium text-gray-900">{getAvatarName(link.avatar_id)}</p>
                     </div>
                     <div>
-                      <p className="text-gray-600">Avatar</p>
-                      <p className="font-medium text-gray-900">{link.config.avatarName || 'Estate Buddy'}</p>
+                      <p className="text-gray-600">Model</p>
+                      <p className="font-medium text-gray-900">{link.config.model || 'gpt-4o-mini'}</p>
                     </div>
                     <div>
                       <p className="text-gray-600">Rate Limit</p>
@@ -282,6 +332,12 @@ export default function Links() {
                     className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                   >
                     <Eye className="w-5 h-5 text-gray-600" />
+                  </button>
+                  <button
+                    onClick={() => handleEdit(link)}
+                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    <Edit className="w-5 h-5 text-gray-600" />
                   </button>
                   <button
                     onClick={() => handleToggleEnabled(link.id, link.is_enabled)}

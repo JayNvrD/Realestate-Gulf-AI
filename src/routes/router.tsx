@@ -5,6 +5,7 @@ import Leads from '../pages/Leads';
 import Conversations from '../pages/Conversations';
 import Reports from '../pages/Reports';
 import KB from '../pages/KB';
+import Avatars from '../pages/Avatars';
 import Links from '../pages/Links';
 import AdminAuth from '../pages/AdminAuth';
 import PublicAvatar from '../pages/PublicAvatar';
@@ -45,6 +46,10 @@ export const router = createBrowserRouter([
       {
         path: 'kb',
         element: <KB />,
+      },
+      {
+        path: 'avatars',
+        element: <Avatars />,
       },
       {
         path: 'links',

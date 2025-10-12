@@ -148,7 +148,9 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { message, threadId } = await req.json();
+    const { message, threadId, systemPrompt } = await req.json();
+
+    const finalSystemPrompt = systemPrompt || SYSTEM_PROMPT;
 
     let currentThreadId = threadId;
     
@@ -188,7 +190,7 @@ Deno.serve(async (req: Request) => {
       body: JSON.stringify({
         name: 'Estate Buddy',
         model: 'gpt-4o-mini',
-        instructions: SYSTEM_PROMPT,
+        instructions: finalSystemPrompt,
         tools: ASSISTANT_TOOLS
       })
     });

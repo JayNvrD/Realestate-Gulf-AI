@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { PublicLink } from '../types/db';
+import { PublicLink, AIAvatar } from '../types/db';
 import { HeyGenAvatarService } from '../lib/heygen';
 import { OpenAIAssistantService } from '../lib/openai';
-import { MessageCircle, Loader, TrendingUp, X } from 'lucide-react';
+import { MessageCircle, Loader, X } from 'lucide-react';
 
 interface ConversationEntry {
   role: 'user' | 'assistant';
@@ -12,29 +12,22 @@ interface ConversationEntry {
   timestamp: Date;
 }
 
-interface Analysis {
-  sentiment?: string;
-  intent?: string;
-  topics?: string[];
-  keyPoints?: string[];
-}
-
 export default function PublicAvatar() {
   const { slug } = useParams<{ slug: string }>();
   const [link, setLink] = useState<PublicLink | null>(null);
+  const [avatar, setAvatar] = useState<AIAvatar | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [isInitialized, setIsInitialized] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [conversationEntries, setConversationEntries] = useState<ConversationEntry[]>([]);
-  const [analysis, setAnalysis] = useState<Analysis>({});
   const [isConnecting, setIsConnecting] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const avatarServiceRef = useRef<HeyGenAvatarService | null>(null);
   const openaiServiceRef = useRef<OpenAIAssistantService | null>(null);
   const recognitionRef = useRef<any>(null);
-  const interimTranscriptRef = useRef<string>('');
+  const conversationEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (slug) {
@@ -51,27 +44,49 @@ export default function PublicAvatar() {
     };
   }, [slug]);
 
+  useEffect(() => {
+    conversationEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [conversationEntries]);
+
   const loadLink = async () => {
     try {
-      const { data, error } = await supabase
+      const { data: linkData, error: linkError } = await supabase
         .from('public_links')
         .select('*')
         .eq('slug', slug)
         .maybeSingle();
 
-      if (error) throw error;
+      if (linkError) throw linkError;
 
-      if (!data) {
+      if (!linkData) {
         setError('Link not found');
         return;
       }
 
-      if (!data.is_enabled) {
+      if (!linkData.is_enabled) {
         setError('This link has been disabled');
         return;
       }
 
-      setLink(data);
+      setLink(linkData);
+
+      if (linkData.avatar_id) {
+        const { data: avatarData, error: avatarError } = await supabase
+          .from('ai_avatars')
+          .select('*')
+          .eq('id', linkData.avatar_id)
+          .maybeSingle();
+
+        if (avatarError) throw avatarError;
+
+        if (avatarData && avatarData.is_active) {
+          setAvatar(avatarData);
+        } else {
+          setError('Avatar is not available');
+        }
+      } else {
+        setError('No avatar configured for this link');
+      }
     } catch (err) {
       console.error('[PublicAvatar] Error loading link:', err);
       setError('Failed to load avatar configuration');
@@ -84,10 +99,17 @@ export default function PublicAvatar() {
     console.log('[PublicAvatar] initializeAvatar called');
     console.log('[PublicAvatar] videoRef.current:', videoRef.current);
     console.log('[PublicAvatar] link:', link);
+    console.log('[PublicAvatar] avatar:', avatar);
 
     if (!link) {
       console.error('[PublicAvatar] Cannot initialize: missing link');
       setError('Configuration not loaded');
+      return;
+    }
+
+    if (!avatar) {
+      console.error('[PublicAvatar] Cannot initialize: missing avatar');
+      setError('Avatar not loaded');
       return;
     }
 
@@ -105,11 +127,12 @@ export default function PublicAvatar() {
       console.log('[PublicAvatar] Creating service instances...');
       avatarServiceRef.current = new HeyGenAvatarService();
       openaiServiceRef.current = new OpenAIAssistantService();
+      openaiServiceRef.current.setSystemPrompt(avatar.system_prompt);
 
-      console.log('[PublicAvatar] Initializing HeyGen avatar with config:', link.config);
+      console.log('[PublicAvatar] Initializing HeyGen avatar with ID:', avatar.heygen_avatar_id);
       await avatarServiceRef.current.initialize(
         videoRef.current,
-        link.config.avatarName
+        avatar.heygen_avatar_id
       );
       console.log('[PublicAvatar] HeyGen avatar initialized successfully');
 
@@ -123,19 +146,14 @@ export default function PublicAvatar() {
         console.log('[PublicAvatar] Speech recognition configured');
 
         recognitionRef.current.onresult = async (event: any) => {
-          let interimTranscript = '';
           let finalTranscript = '';
 
           for (let i = event.resultIndex; i < event.results.length; i++) {
             const transcript = event.results[i][0].transcript;
             if (event.results[i].isFinal) {
               finalTranscript += transcript;
-            } else {
-              interimTranscript += transcript;
             }
           }
-
-          interimTranscriptRef.current = interimTranscript;
 
           if (finalTranscript) {
             await handleUserMessage(finalTranscript);
@@ -169,7 +187,7 @@ export default function PublicAvatar() {
       setIsConnecting(false);
       console.log('[PublicAvatar] Avatar fully initialized');
 
-      const greeting = "Hello! I'm Estate Buddy, your AI real estate assistant. How can I help you find your perfect property today?";
+      const greeting = `Hello! I'm ${avatar.name.split(' - ')[0]}. How can I assist you today?`;
       const entry: ConversationEntry = {
         role: 'assistant',
         text: greeting,
@@ -204,9 +222,7 @@ export default function PublicAvatar() {
         text: message,
         timestamp: new Date()
       };
-      setConversationEntries(prev => [userEntry, ...prev]);
-
-      analyzeMessage(message, 'user');
+      setConversationEntries(prev => [...prev, userEntry]);
 
       const response = await openaiServiceRef.current.sendMessage(message);
 
@@ -215,9 +231,7 @@ export default function PublicAvatar() {
         text: response,
         timestamp: new Date()
       };
-      setConversationEntries(prev => [assistantEntry, ...prev]);
-
-      analyzeMessage(response, 'assistant');
+      setConversationEntries(prev => [...prev, assistantEntry]);
 
       await avatarServiceRef.current.speak(response);
     } catch (err) {
@@ -228,7 +242,7 @@ export default function PublicAvatar() {
         text: errorMsg,
         timestamp: new Date()
       };
-      setConversationEntries(prev => [errorEntry, ...prev]);
+      setConversationEntries(prev => [...prev, errorEntry]);
 
       if (avatarServiceRef.current) {
         await avatarServiceRef.current.speak(errorMsg);
@@ -236,45 +250,6 @@ export default function PublicAvatar() {
     } finally {
       setIsSpeaking(false);
     }
-  };
-
-  const analyzeMessage = (text: string, role: 'user' | 'assistant') => {
-    const lowerText = text.toLowerCase();
-
-    const sentiments = ['positive', 'neutral', 'negative'];
-    let detectedSentiment = 'neutral';
-    if (lowerText.includes('great') || lowerText.includes('perfect') || lowerText.includes('excellent') || lowerText.includes('love')) {
-      detectedSentiment = 'positive';
-    } else if (lowerText.includes('not') || lowerText.includes('no') || lowerText.includes('don\'t')) {
-      detectedSentiment = 'negative';
-    }
-
-    const topics: string[] = [];
-    if (lowerText.includes('property') || lowerText.includes('flat') || lowerText.includes('apartment')) topics.push('Property Inquiry');
-    if (lowerText.includes('price') || lowerText.includes('budget') || lowerText.includes('cost')) topics.push('Pricing');
-    if (lowerText.includes('location') || lowerText.includes('area') || lowerText.includes('where')) topics.push('Location');
-    if (lowerText.includes('amenity') || lowerText.includes('amenities') || lowerText.includes('facilities')) topics.push('Amenities');
-    if (lowerText.includes('bhk') || lowerText.includes('bedroom')) topics.push('Unit Type');
-
-    const keyPoints: string[] = [];
-    if (role === 'user') {
-      if (lowerText.includes('looking for') || lowerText.includes('want')) {
-        keyPoints.push('Active search intent');
-      }
-      if (lowerText.match(/\d+\s*(bhk|bedroom)/)) {
-        keyPoints.push('Specific unit requirement');
-      }
-      if (lowerText.match(/\d+\s*(lakh|crore|million)/)) {
-        keyPoints.push('Budget mentioned');
-      }
-    }
-
-    setAnalysis({
-      sentiment: detectedSentiment,
-      intent: role === 'user' ? 'Information Seeking' : 'Information Providing',
-      topics: topics.length > 0 ? topics : ['General Conversation'],
-      keyPoints: keyPoints.length > 0 ? keyPoints : ['Engagement ongoing']
-    });
   };
 
   const endSession = async () => {
@@ -287,7 +262,6 @@ export default function PublicAvatar() {
       }
       setIsInitialized(false);
       setConversationEntries([]);
-      setAnalysis({});
       window.location.reload();
     } catch (err) {
       console.error('[PublicAvatar] Error ending session:', err);
@@ -305,7 +279,7 @@ export default function PublicAvatar() {
     );
   }
 
-  if (error || !link) {
+  if (error || !link || !avatar) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
         <div className="bg-slate-800 rounded-xl p-8 max-w-md w-full text-center border border-red-500/30">
@@ -358,8 +332,11 @@ export default function PublicAvatar() {
                   <MessageCircle className="w-16 h-16 text-white" />
                 </div>
                 <h2 className="text-3xl font-bold text-white mb-3">{link.title}</h2>
-                <p className="text-slate-300 text-lg mb-8 max-w-md mx-auto">
-                  Start a conversation with your AI real estate assistant
+                <p className="text-slate-300 text-lg mb-2 max-w-md mx-auto">
+                  {avatar.name}
+                </p>
+                <p className="text-slate-400 text-sm mb-8 max-w-md mx-auto">
+                  Start a conversation with your AI assistant
                 </p>
                 <button
                   onClick={initializeAvatar}
@@ -377,142 +354,51 @@ export default function PublicAvatar() {
             )}
           </div>
         ) : (
-          <div className="w-full max-w-7xl h-full flex gap-6">
-            <div className="w-80 bg-slate-800/40 backdrop-blur-xl rounded-2xl p-6 border border-white/10 shadow-2xl flex flex-col h-full">
-              <div className="mb-4">
-                <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                  <MessageCircle className="w-5 h-5" />
-                  Conversation
-                </h2>
-                <p className="text-sm text-slate-400 mt-1">Live transcript</p>
-              </div>
-
-              {conversationEntries.length === 0 ? (
-                <div className="flex-1 flex items-center justify-center">
-                  <div className="text-center">
-                    <MessageCircle className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-                    <p className="text-slate-500 text-sm italic">
-                      Start speaking to see the conversation here
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
-                  {conversationEntries.map((entry, idx) => (
-                    <div
-                      key={idx}
-                      className={`p-3 rounded-lg ${
-                        entry.role === 'user'
-                          ? 'bg-blue-500/20 border border-blue-500/30'
-                          : 'bg-slate-700/40 border border-slate-600/30'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className={`text-xs font-semibold ${
-                          entry.role === 'user' ? 'text-blue-400' : 'text-emerald-400'
-                        }`}>
-                          {entry.role === 'user' ? 'You' : 'Assistant'}
-                        </span>
-                        <span className="text-xs text-slate-500">
-                          {entry.timestamp.toLocaleTimeString()}
-                        </span>
-                      </div>
-                      <p className="text-sm text-slate-200 leading-relaxed">{entry.text}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
+          <div className="fixed left-6 top-6 bottom-6 w-96 bg-slate-800/40 backdrop-blur-xl rounded-2xl p-6 border border-white/10 shadow-2xl flex flex-col">
+            <div className="mb-4">
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <MessageCircle className="w-5 h-5" />
+                Conversation
+              </h2>
+              <p className="text-sm text-slate-400 mt-1">Live transcript</p>
             </div>
 
-            <div className="flex-1"></div>
-
-            <div className="w-80 bg-slate-800/40 backdrop-blur-xl rounded-2xl p-6 border border-white/10 shadow-2xl flex flex-col h-full">
-              <div className="mb-4">
-                <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                  <TrendingUp className="w-5 h-5" />
-                  Interpretation
-                </h2>
-                <p className="text-sm text-slate-400 mt-1">Real-time analysis</p>
-              </div>
-
-              {conversationEntries.length === 0 ? (
-                <div className="flex-1 flex flex-col items-center justify-center text-center">
-                  <TrendingUp className="w-12 h-12 text-slate-600 mb-3" />
+            {conversationEntries.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center">
+                <div className="text-center">
+                  <MessageCircle className="w-12 h-12 text-slate-600 mx-auto mb-3" />
                   <p className="text-slate-500 text-sm italic">
-                    Analysis will appear here during conversation
+                    Start speaking to see the conversation here
                   </p>
                 </div>
-              ) : (
-                <div className="flex-1 space-y-6 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
-                  {analysis.sentiment && (
-                    <div className="bg-slate-700/40 rounded-lg p-4 border border-slate-600/30">
-                      <h3 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">
-                        Sentiment
-                      </h3>
-                      <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium ${
-                        analysis.sentiment === 'positive'
-                          ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-                          : analysis.sentiment === 'negative'
-                          ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                          : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+                {conversationEntries.map((entry, idx) => (
+                  <div
+                    key={idx}
+                    className={`p-3 rounded-lg ${
+                      entry.role === 'user'
+                        ? 'bg-blue-500/20 border border-blue-500/30'
+                        : 'bg-slate-700/40 border border-slate-600/30'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`text-xs font-semibold ${
+                        entry.role === 'user' ? 'text-blue-400' : 'text-emerald-400'
                       }`}>
-                        <div className={`w-2 h-2 rounded-full ${
-                          analysis.sentiment === 'positive'
-                            ? 'bg-green-400'
-                            : analysis.sentiment === 'negative'
-                            ? 'bg-red-400'
-                            : 'bg-blue-400'
-                        }`}></div>
-                        {analysis.sentiment.charAt(0).toUpperCase() + analysis.sentiment.slice(1)}
-                      </div>
+                        {entry.role === 'user' ? 'You' : 'Assistant'}
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        {entry.timestamp.toLocaleTimeString()}
+                      </span>
                     </div>
-                  )}
-
-                  {analysis.intent && (
-                    <div className="bg-slate-700/40 rounded-lg p-4 border border-slate-600/30">
-                      <h3 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">
-                        Intent
-                      </h3>
-                      <p className="text-sm text-slate-200">{analysis.intent}</p>
-                    </div>
-                  )}
-
-                  {analysis.topics && analysis.topics.length > 0 && (
-                    <div className="bg-slate-700/40 rounded-lg p-4 border border-slate-600/30">
-                      <h3 className="text-xs font-semibold text-slate-400 mb-3 uppercase tracking-wider">
-                        Topics Detected
-                      </h3>
-                      <div className="flex flex-wrap gap-2">
-                        {analysis.topics.map((topic, idx) => (
-                          <span
-                            key={idx}
-                            className="px-3 py-1 bg-cyan-500/20 text-cyan-300 text-xs font-medium rounded-full border border-cyan-500/30"
-                          >
-                            {topic}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {analysis.keyPoints && analysis.keyPoints.length > 0 && (
-                    <div className="bg-slate-700/40 rounded-lg p-4 border border-slate-600/30">
-                      <h3 className="text-xs font-semibold text-slate-400 mb-3 uppercase tracking-wider">
-                        Key Points
-                      </h3>
-                      <ul className="space-y-2">
-                        {analysis.keyPoints.map((point, idx) => (
-                          <li key={idx} className="flex items-start gap-2 text-sm text-slate-300">
-                            <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-1.5 flex-shrink-0"></div>
-                            <span>{point}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+                    <p className="text-sm text-slate-200 leading-relaxed">{entry.text}</p>
+                  </div>
+                ))}
+                <div ref={conversationEndRef} />
+              </div>
+            )}
           </div>
         )}
       </div>

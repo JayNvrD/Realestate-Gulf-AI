@@ -7,6 +7,7 @@ import {
   MessageSquare,
   BarChart3,
   Database,
+  Bot,
   Link as LinkIcon,
   LogOut,
   Building2,
@@ -22,7 +23,8 @@ export default function Layout() {
     { name: 'Conversations', href: '/conversations', icon: MessageSquare },
     { name: 'Reports', href: '/reports', icon: BarChart3 },
     { name: 'Knowledge Base', href: '/kb', icon: Database },
-    { name: 'AI Avatar', href: '/links', icon: LinkIcon },
+    { name: 'AI Avatars', href: '/avatars', icon: Bot },
+    { name: 'Public Links', href: '/links', icon: LinkIcon },
   ];
 
   const isActive = (path: string) => location.pathname === path;

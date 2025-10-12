@@ -68,15 +68,25 @@ export interface AdminProfile {
   created_at: string;
 }
 
+export interface AIAvatar {
+  id: string;
+  name: string;
+  heygen_avatar_id: string;
+  system_prompt: string;
+  is_active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PublicLink {
   id: string;
   slug: string;
   title: string;
   is_enabled: boolean;
+  avatar_id: string | null;
   config: {
-    assistantPrompt?: string;
     model?: string;
-    avatarName?: string;
     voice?: string;
   };
   rate_limit_per_min: number;

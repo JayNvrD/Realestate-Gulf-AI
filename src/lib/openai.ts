@@ -7,6 +7,11 @@ export interface ConversationMessage {
 export class OpenAIAssistantService {
   private threadId: string | null = null;
   private messages: ConversationMessage[] = [];
+  private systemPrompt: string | null = null;
+
+  setSystemPrompt(prompt: string): void {
+    this.systemPrompt = prompt;
+  }
 
   async sendMessage(message: string): Promise<string> {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -19,6 +24,7 @@ export class OpenAIAssistantService {
       body: JSON.stringify({
         message,
         threadId: this.threadId,
+        systemPrompt: this.systemPrompt,
       }),
     });
 
