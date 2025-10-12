@@ -8,16 +8,15 @@ const corsHeaders = {
 };
 
 Deno.serve(async (req: Request) => {
-  // Handle CORS preflight request
+  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
 
   try {
-    // Retrieve your Deepgram API key from environment variables
+    // 🔐 Get your Deepgram API key from Supabase environment variables
     const DEEPGRAM_API_KEY = Deno.env.get('DEEPGRAM_API_KEY');
 
-    // Check if the key exists
     if (!DEEPGRAM_API_KEY) {
       console.error('[Deepgram] Missing DEEPGRAM_API_KEY in environment');
       return new Response(
@@ -25,24 +24,18 @@ Deno.serve(async (req: Request) => {
           error: 'DEEPGRAM_API_KEY not configured in environment variables',
         }),
         {
-          status: 401,
-          headers: {
-            ...corsHeaders,
-            'Content-Type': 'application/json',
-          },
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         }
       );
     }
 
-    // Return the key to your frontend as JSON
+    // ✅ Return key in JSON format (no authorization required)
     return new Response(
       JSON.stringify({ key: DEEPGRAM_API_KEY }),
       {
         status: 200,
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'application/json',
-        },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       }
     );
   } catch (error) {
@@ -54,10 +47,7 @@ Deno.serve(async (req: Request) => {
       }),
       {
         status: 500,
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'application/json',
-        },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       }
     );
   }
