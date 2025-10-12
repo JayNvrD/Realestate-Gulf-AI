@@ -1,3 +1,6 @@
+// Allow public access to this function
+Deno.env.set('SUPABASE_FUNCTIONS_VERIFY_JWT', 'false');
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
