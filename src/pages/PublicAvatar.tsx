@@ -81,8 +81,19 @@ export default function PublicAvatar() {
   };
 
   const initializeAvatar = async () => {
-    if (!videoRef.current || !link) {
-      console.error('[PublicAvatar] Cannot initialize: missing videoRef or link');
+    console.log('[PublicAvatar] initializeAvatar called');
+    console.log('[PublicAvatar] videoRef.current:', videoRef.current);
+    console.log('[PublicAvatar] link:', link);
+
+    if (!link) {
+      console.error('[PublicAvatar] Cannot initialize: missing link');
+      setError('Configuration not loaded');
+      return;
+    }
+
+    if (!videoRef.current) {
+      console.error('[PublicAvatar] Cannot initialize: video element not found');
+      setError('Video element not ready');
       return;
     }
 
@@ -309,14 +320,13 @@ export default function PublicAvatar() {
   return (
     <div className="fixed inset-0 overflow-hidden">
       <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-        {isInitialized && (
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            className="absolute inset-0 w-full h-full object-cover"
-          />
-        )}
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ display: isInitialized ? 'block' : 'none' }}
+        />
       </div>
 
       {isInitialized && (

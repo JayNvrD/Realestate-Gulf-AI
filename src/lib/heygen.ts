@@ -6,12 +6,14 @@ import StreamingAvatar, {
 
 export class HeyGenAvatarService {
   private avatar: StreamingAvatar | null = null;
-  private mediaStream: MediaStream | null = null;
   private sessionData: any = null;
+  private videoElement: HTMLVideoElement | null = null;
 
   async initialize(videoElement: HTMLVideoElement, avatarName?: string): Promise<void> {
     try {
       console.log('[HeyGen] Initializing avatar service...');
+
+      this.videoElement = videoElement;
 
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       if (!supabaseUrl) {
@@ -34,13 +36,11 @@ export class HeyGenAvatarService {
 
       this.avatar.on(StreamingEvents.STREAM_READY, (event) => {
         console.log('[HeyGen] Stream ready event received:', event);
-        if (event.detail && videoElement) {
-          this.mediaStream = event.detail;
-          videoElement.srcObject = this.mediaStream;
-
-          videoElement.onloadedmetadata = () => {
+        if (event.detail && this.videoElement) {
+          this.videoElement.srcObject = event.detail;
+          this.videoElement.onloadedmetadata = () => {
             console.log('[HeyGen] Video metadata loaded, starting playback');
-            videoElement.play().catch((error) => {
+            this.videoElement?.play().catch((error) => {
               console.error('[HeyGen] Video play error:', error);
             });
           };
@@ -51,8 +51,8 @@ export class HeyGenAvatarService {
 
       this.avatar.on(StreamingEvents.STREAM_DISCONNECTED, () => {
         console.log('[HeyGen] Stream disconnected');
-        if (videoElement) {
-          videoElement.srcObject = null;
+        if (this.videoElement) {
+          this.videoElement.srcObject = null;
         }
       });
 
@@ -67,7 +67,6 @@ export class HeyGenAvatarService {
       const avatarConfig = {
         quality: AvatarQuality.High,
         avatarName: avatarName || import.meta.env.VITE_HEYGEN_AVATAR_NAME || 'Wayne_20240711',
-        language: 'English',
       };
 
       console.log('[HeyGen] Creating avatar session with config:', avatarConfig);
@@ -137,14 +136,11 @@ export class HeyGenAvatarService {
   }
 
   private cleanup(): void {
-    if (this.mediaStream) {
-      this.mediaStream.getTracks().forEach(track => {
-        track.stop();
-        console.log('[HeyGen] Stopped media track:', track.kind);
-      });
-      this.mediaStream = null;
+    if (this.videoElement) {
+      this.videoElement.srcObject = null;
     }
     this.sessionData = null;
+    this.videoElement = null;
   }
 
   isInitialized(): boolean {
