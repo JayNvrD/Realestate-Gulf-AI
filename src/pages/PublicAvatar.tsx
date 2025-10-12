@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { PublicLink, AIAvatar } from '../types/db';
 import { HeyGenAvatarService } from '../lib/heygen';
 import { OpenAIAssistantService } from '../lib/openai';
+import { DeepgramSTTService } from '../lib/deepgram';
 import { MessageCircle, Loader, X } from 'lucide-react';
 
 interface ConversationEntry {
@@ -26,21 +27,14 @@ export default function PublicAvatar() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const avatarServiceRef = useRef<HeyGenAvatarService | null>(null);
   const openaiServiceRef = useRef<OpenAIAssistantService | null>(null);
-  const recognitionRef = useRef<any>(null);
+  const deepgramRef = useRef<DeepgramSTTService | null>(null);
   const conversationEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (slug) {
-      loadLink();
-    }
-
+    if (slug) loadLink();
     return () => {
-      if (avatarServiceRef.current) {
-        avatarServiceRef.current.close();
-      }
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
+      avatarServiceRef.current?.close();
+      deepgramRef.current?.stopListening();
     };
   }, [slug]);
 
@@ -57,16 +51,8 @@ export default function PublicAvatar() {
         .maybeSingle();
 
       if (linkError) throw linkError;
-
-      if (!linkData) {
-        setError('Link not found');
-        return;
-      }
-
-      if (!linkData.is_enabled) {
-        setError('This link has been disabled');
-        return;
-      }
+      if (!linkData) return setError('Link not found');
+      if (!linkData.is_enabled) return setError('This link has been disabled');
 
       setLink(linkData);
 
@@ -78,12 +64,8 @@ export default function PublicAvatar() {
           .maybeSingle();
 
         if (avatarError) throw avatarError;
-
-        if (avatarData && avatarData.is_active) {
-          setAvatar(avatarData);
-        } else {
-          setError('Avatar is not available');
-        }
+        if (avatarData && avatarData.is_active) setAvatar(avatarData);
+        else setError('Avatar is not available');
       } else {
         setError('No avatar configured for this link');
       }
@@ -97,156 +79,63 @@ export default function PublicAvatar() {
 
   const initializeAvatar = async () => {
     console.log('[PublicAvatar] initializeAvatar called');
-    console.log('[PublicAvatar] videoRef.current:', videoRef.current);
-    console.log('[PublicAvatar] link:', link);
-    console.log('[PublicAvatar] avatar:', avatar);
 
-    if (!link) {
-      console.error('[PublicAvatar] Cannot initialize: missing link');
-      setError('Configuration not loaded');
-      return;
-    }
-
-    if (!avatar) {
-      console.error('[PublicAvatar] Cannot initialize: missing avatar');
-      setError('Avatar not loaded');
-      return;
-    }
-
-    if (!videoRef.current) {
-      console.error('[PublicAvatar] Cannot initialize: video element not found');
-      setError('Video element not ready');
+    if (!link || !avatar || !videoRef.current) {
+      setError('Configuration missing or video element not ready');
       return;
     }
 
     try {
-      console.log('[PublicAvatar] Starting avatar initialization...');
       setIsConnecting(true);
       setError('');
 
-      console.log('[PublicAvatar] Creating service instances...');
       avatarServiceRef.current = new HeyGenAvatarService();
       openaiServiceRef.current = new OpenAIAssistantService();
       openaiServiceRef.current.setSystemPrompt(avatar.system_prompt);
 
-      console.log('[PublicAvatar] Initializing HeyGen avatar with ID:', avatar.heygen_avatar_id);
-      await avatarServiceRef.current.initialize(
-        videoRef.current,
-        avatar.heygen_avatar_id
-      );
+      console.log('[PublicAvatar] Initializing HeyGen avatar...');
+      await avatarServiceRef.current.initialize(videoRef.current, avatar.heygen_avatar_id);
       console.log('[PublicAvatar] HeyGen avatar initialized successfully');
 
-      console.log('[PublicAvatar] Setting up speech recognition...');
-      if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-        const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
-        recognitionRef.current = new SpeechRecognition();
-        recognitionRef.current.continuous = true;
-        recognitionRef.current.interimResults = true;
-        recognitionRef.current.lang = 'en-US';
-        console.log('[PublicAvatar] Speech recognition configured');
+      // ✅ Deepgram STT
+      const deepgramKey = import.meta.env.VITE_DEEPGRAM_API_KEY;
+      deepgramRef.current = new DeepgramSTTService(deepgramKey);
 
-        recognitionRef.current.onresult = async (event: any) => {
-          let finalTranscript = '';
+      await deepgramRef.current.startListening(async (transcript) => {
+        if (!transcript.trim()) return;
+        console.log('[Deepgram STT] Transcript:', transcript);
+        await handleUserMessage(transcript);
+      });
 
-          for (let i = event.resultIndex; i < event.results.length; i++) {
-            const transcript = event.results[i][0].transcript;
-            if (event.results[i].isFinal) {
-              finalTranscript += transcript;
-            }
-          }
-
-          if (finalTranscript) {
-            await handleUserMessage(finalTranscript);
-          }
-        };
-
-        recognitionRef.current.onerror = (event: any) => {
-          console.error('[PublicAvatar] Speech recognition error:', event.error);
-          if (event.error !== 'no-speech') {
-            setError('Voice recognition error. Please try again.');
-          }
-        };
-
-        recognitionRef.current.onend = () => {
-          if (isInitialized && !isSpeaking) {
-            try {
-              recognitionRef.current?.start();
-            } catch (e) {
-              console.log('[PublicAvatar] Recognition restart skipped');
-            }
-          }
-        };
-
-        recognitionRef.current.start();
-        console.log('[PublicAvatar] Speech recognition started');
-      } else {
-        console.warn('[PublicAvatar] Speech recognition not available in this browser');
-      }
-
+      console.log('[PublicAvatar] Deepgram listening started');
       setIsInitialized(true);
       setIsConnecting(false);
-      console.log('[PublicAvatar] Avatar fully initialized');
-
-      const greeting = `Hello! I'm ${avatar.name.split(' - ')[0]}. How can I assist you today?`;
-      const entry: ConversationEntry = {
-        role: 'assistant',
-        text: greeting,
-        timestamp: new Date()
-      };
-      setConversationEntries([entry]);
-
-      console.log('[PublicAvatar] Speaking greeting...');
-      await avatarServiceRef.current.speak(greeting);
-      console.log('[PublicAvatar] Greeting completed');
     } catch (err) {
-      console.error('[PublicAvatar] Fatal error during initialization:', err);
-      if (err instanceof Error) {
-        console.error('[PublicAvatar] Error message:', err.message);
-        console.error('[PublicAvatar] Error stack:', err.stack);
-      }
-      setError('Failed to initialize avatar. Please check console for details and try again.');
+      console.error('[PublicAvatar] Initialization error:', err);
+      setError('Failed to initialize avatar. Check console for details.');
       setIsConnecting(false);
     }
   };
 
   const handleUserMessage = async (message: string) => {
-    if (!avatarServiceRef.current || !openaiServiceRef.current || !message.trim() || isSpeaking) {
-      return;
-    }
+    if (!avatarServiceRef.current || !openaiServiceRef.current || !message.trim() || isSpeaking) return;
 
     try {
       setIsSpeaking(true);
-
-      const userEntry: ConversationEntry = {
-        role: 'user',
-        text: message,
-        timestamp: new Date()
-      };
-      setConversationEntries(prev => [...prev, userEntry]);
+      const userEntry: ConversationEntry = { role: 'user', text: message, timestamp: new Date() };
+      setConversationEntries((prev) => [...prev, userEntry]);
 
       const response = await openaiServiceRef.current.sendMessage(message);
-
-      const assistantEntry: ConversationEntry = {
-        role: 'assistant',
-        text: response,
-        timestamp: new Date()
-      };
-      setConversationEntries(prev => [...prev, assistantEntry]);
+      const assistantEntry: ConversationEntry = { role: 'assistant', text: response, timestamp: new Date() };
+      setConversationEntries((prev) => [...prev, assistantEntry]);
 
       await avatarServiceRef.current.speak(response);
     } catch (err) {
       console.error('[PublicAvatar] Error processing message:', err);
-      const errorMsg = 'I apologize, but I encountered an error. Could you please try again?';
-      const errorEntry: ConversationEntry = {
-        role: 'assistant',
-        text: errorMsg,
-        timestamp: new Date()
-      };
-      setConversationEntries(prev => [...prev, errorEntry]);
-
-      if (avatarServiceRef.current) {
-        await avatarServiceRef.current.speak(errorMsg);
-      }
+      const fallback = 'I encountered an error. Could you please repeat that?';
+      const entry: ConversationEntry = { role: 'assistant', text: fallback, timestamp: new Date() };
+      setConversationEntries((prev) => [...prev, entry]);
+      await avatarServiceRef.current?.speak(fallback);
     } finally {
       setIsSpeaking(false);
     }
@@ -254,12 +143,8 @@ export default function PublicAvatar() {
 
   const endSession = async () => {
     try {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-      if (avatarServiceRef.current) {
-        await avatarServiceRef.current.close();
-      }
+      deepgramRef.current?.stopListening();
+      await avatarServiceRef.current?.close();
       setIsInitialized(false);
       setConversationEntries([]);
       window.location.reload();
@@ -268,6 +153,7 @@ export default function PublicAvatar() {
     }
   };
 
+  // === UI ===
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
@@ -322,9 +208,7 @@ export default function PublicAvatar() {
                   <div className="absolute inset-0 rounded-full border-4 border-white/30"></div>
                   <div className="absolute inset-0 rounded-full border-4 border-t-white animate-spin"></div>
                 </div>
-                <p className="text-white text-xl font-medium animate-pulse">
-                  Connecting...
-                </p>
+                <p className="text-white text-xl font-medium animate-pulse">Connecting...</p>
               </div>
             ) : (
               <div className="text-center px-6">
@@ -332,11 +216,9 @@ export default function PublicAvatar() {
                   <MessageCircle className="w-16 h-16 text-white" />
                 </div>
                 <h2 className="text-3xl font-bold text-white mb-3">{link.title}</h2>
-                <p className="text-slate-300 text-lg mb-2 max-w-md mx-auto">
-                  {avatar.name}
-                </p>
+                <p className="text-slate-300 text-lg mb-2 max-w-md mx-auto">{avatar.name}</p>
                 <p className="text-slate-400 text-sm mb-8 max-w-md mx-auto">
-                  Start a conversation with your AI assistant
+                  Start speaking to interact with your AI assistant
                 </p>
                 <button
                   onClick={initializeAvatar}
@@ -345,11 +227,6 @@ export default function PublicAvatar() {
                 >
                   Start Conversation
                 </button>
-                {error && (
-                  <div className="mt-6 p-4 bg-red-500/20 border border-red-500/50 rounded-lg max-w-md mx-auto">
-                    <p className="text-red-300 text-sm">{error}</p>
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -367,9 +244,7 @@ export default function PublicAvatar() {
               <div className="flex-1 flex items-center justify-center">
                 <div className="text-center">
                   <MessageCircle className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-                  <p className="text-slate-500 text-sm italic">
-                    Start speaking to see the conversation here
-                  </p>
+                  <p className="text-slate-500 text-sm italic">Speak to begin your conversation</p>
                 </div>
               </div>
             ) : (
@@ -384,9 +259,11 @@ export default function PublicAvatar() {
                     }`}
                   >
                     <div className="flex items-center gap-2 mb-1">
-                      <span className={`text-xs font-semibold ${
-                        entry.role === 'user' ? 'text-blue-400' : 'text-emerald-400'
-                      }`}>
+                      <span
+                        className={`text-xs font-semibold ${
+                          entry.role === 'user' ? 'text-blue-400' : 'text-emerald-400'
+                        }`}
+                      >
                         {entry.role === 'user' ? 'You' : 'Assistant'}
                       </span>
                       <span className="text-xs text-slate-500">
@@ -431,7 +308,7 @@ export default function PublicAvatar() {
 
       <div className="fixed bottom-4 right-4 text-xs text-white/40 flex items-center gap-2 z-10">
         <span className="opacity-60">Powered by</span>
-        <span className="font-semibold text-white/60">HeyGen</span>
+        <span className="font-semibold text-white/60">HeyGen × Deepgram</span>
       </div>
     </div>
   );
