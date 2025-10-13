@@ -1,4 +1,3 @@
-
 // ✅ Strict & complete CORS headers
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*", // or set to your frontend origin
