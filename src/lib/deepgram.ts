@@ -7,6 +7,7 @@ export class DeepgramSTTService {
   private source: MediaStreamAudioSourceNode | null = null;
   private processor: ScriptProcessorNode | null = null;
   private reconnecting = false;
+  private isHandshakeComplete = false;
 
   async startListening(onTranscript: (text: string) => void) {
     console.log('[DeepgramSTT] 🎤 Requesting microphone access...');
@@ -45,13 +46,17 @@ export class DeepgramSTTService {
     // 🎧 Connect to Deepgram real-time WebSocket
     this.socket = new WebSocket(
       'wss://api.deepgram.com/v1/listen?model=general&language=en-US&punctuate=true',
-      `token ${deepgramToken}`
+      ['token', deepgramToken]
     );
     this.socket.binaryType = 'arraybuffer';
 
     // 🔗 Connection lifecycle handlers
     this.socket.onopen = () => {
-      console.log('[DeepgramSTT] ✅ Connected to Deepgram');
+      console.log('[DeepgramSTT] ✅ Connected to Deepgram (101 Switching Protocols)');
+      setTimeout(() => {
+        this.isHandshakeComplete = true;
+        console.log('[DeepgramSTT] Handshake complete, audio streaming enabled');
+      }, 100);
       setInterval(() => {
         if (this.socket?.readyState === WebSocket.OPEN) {
           this.socket.send(JSON.stringify({ type: 'KeepAlive' }));
@@ -87,9 +92,9 @@ export class DeepgramSTTService {
       }
     };
 
-    // 🎙️ Stream mic audio frames to Deepgram
+    // 🎙️ Stream mic audio frames to Deepgram (with handshake delay)
     this.processor.onaudioprocess = (ev) => {
-      if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+      if (!this.isHandshakeComplete || !this.socket || this.socket.readyState !== WebSocket.OPEN) return;
       const input = ev.inputBuffer.getChannelData(0);
       const buffer = this.floatTo16BitPCM(input);
       this.socket.send(buffer);

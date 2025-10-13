@@ -21,6 +21,7 @@ class DeepgramSTTService {
   private processor: ScriptProcessorNode | null = null;
   private onTranscriptionCallback?: (text: string) => void;
   private reconnecting = false;
+  private isHandshakeComplete = false;
 
   async startListening(onTranscription: (text: string) => void) {
     this.onTranscriptionCallback = onTranscription;
@@ -64,13 +65,17 @@ class DeepgramSTTService {
     // 🎧 Connect to Deepgram WebSocket using token authentication
     this.socket = new WebSocket(
       'wss://api.deepgram.com/v1/listen?model=general&language=en-US&punctuate=true',
-      `token ${deepgramToken}`
+      ['token', deepgramToken]
     );
     this.socket.binaryType = 'arraybuffer';
 
     // 🔗 WebSocket lifecycle handlers
     this.socket.onopen = () => {
-      console.log('[DeepgramSTT] ✅ Connected to Deepgram');
+      console.log('[DeepgramSTT] ✅ Connected to Deepgram (101 Switching Protocols)');
+      setTimeout(() => {
+        this.isHandshakeComplete = true;
+        console.log('[DeepgramSTT] Handshake complete, audio streaming enabled');
+      }, 100);
       setInterval(() => {
         if (this.socket?.readyState === WebSocket.OPEN) {
           this.socket.send(JSON.stringify({ type: 'KeepAlive' }));
@@ -106,9 +111,9 @@ class DeepgramSTTService {
       }
     };
 
-    // 🎙️ Stream audio to Deepgram
+    // 🎙️ Stream audio to Deepgram (with handshake delay)
     this.processor.onaudioprocess = (event) => {
-      if (this.socket?.readyState !== WebSocket.OPEN) return;
+      if (!this.isHandshakeComplete || this.socket?.readyState !== WebSocket.OPEN) return;
       const inputData = event.inputBuffer.getChannelData(0);
       const int16Data = this.floatTo16BitPCM(inputData);
       this.socket.send(int16Data);
