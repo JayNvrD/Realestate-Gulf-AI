@@ -158,9 +158,8 @@ async function callToolFunction(name: string, args: any): Promise<string> {
 }
 
 Deno.serve(async (req: Request) => {
-  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 200, headers: corsHeaders });
+    return new Response('ok', { status: 200, headers: corsHeaders });
   }
 
   const startTime = Date.now();
