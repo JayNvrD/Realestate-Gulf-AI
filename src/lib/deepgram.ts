@@ -37,12 +37,13 @@ export class DeepgramSTTService {
       throw new Error(`Failed to fetch Deepgram key: ${res.status}`);
     }
 
-    const { key } = await res.json();
-    if (!key) throw new Error('[DeepgramSTT] Missing key in response.');
+    const { key, token } = await res.json();
+    const deepgramToken = key || token;
+    if (!deepgramToken) throw new Error('[DeepgramSTT] Missing key in response.');
     console.log('[DeepgramSTT] 🔑 Key retrieved successfully');
 
     // 🎧 Connect to Deepgram real-time WebSocket
-    const protocol = ['token', key];
+    const protocol = ['token', deepgramToken];
     this.socket = new WebSocket(
       'wss://api.deepgram.com/v1/listen?model=general&language=en-US&punctuate=true',
       protocol

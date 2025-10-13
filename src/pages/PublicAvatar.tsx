@@ -56,14 +56,15 @@ class DeepgramSTTService {
       throw new Error(`Failed to fetch Deepgram token: ${response.status}`);
     }
 
-    const { token } = await response.json();
-    if (!token) throw new Error('[DeepgramSTT] No token returned from Supabase function');
+    const { key, token } = await response.json();
+    const deepgramToken = key || token;
+    if (!deepgramToken) throw new Error('[DeepgramSTT] No token returned from Supabase function');
     console.log('[DeepgramSTT] 🔑 Token retrieved successfully');
 
     // 🎧 Connect to Deepgram WebSocket using token authentication
     this.socket = new WebSocket(
       'wss://api.deepgram.com/v1/listen?model=general&language=en-US&punctuate=true',
-      ['token', token]
+      ['token', deepgramToken]
     );
     this.socket.binaryType = 'arraybuffer';
 
