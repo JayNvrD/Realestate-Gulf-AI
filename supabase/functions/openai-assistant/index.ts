@@ -1,5 +1,3 @@
-// 🔓 Allow anonymous (no JWT verification)
-Deno.env.set("SUPABASE_FUNCTIONS_VERIFY_JWT", "false");
 
 // ✅ Strict & complete CORS headers
 const corsHeaders = {
