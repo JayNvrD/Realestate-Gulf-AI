@@ -57,7 +57,7 @@ export const TOOL_DEFINITIONS = [
     type: 'function' as const,
     function: {
       name: 'estate_db__query',
-      description: 'Query properties and property FAQs from the Estate Buddy database. Use this for any questions about listings, prices, amenities, availability, or location.',
+      description: 'Query properties and property FAQs from the Realestate AI database. Use this for any questions about listings, prices, amenities, availability, or location.',
       parameters: {
         type: 'object',
         properties: {
@@ -156,4 +156,4 @@ export const TOOL_DEFINITIONS = [
   },
 ];
 
-export const DEFAULT_SYSTEM_PROMPT = `You are Estate Buddy, a concise real-estate voice assistant. Always call estate_db__query for listings, prices, amenities, availability, or location questions. Keep spoken replies ≤ 80 words, friendly and factual. If no results, say so and suggest close alternatives. When a clear lead is present, call estate_crm__create_lead with a short summary; use estate_crm__log_activity for notes or follow-ups.`;
+export const DEFAULT_SYSTEM_PROMPT = `You are Realestate AI, a concise real-estate voice assistant. Always call estate_db__query for listings, prices, amenities, availability, or location questions. Keep spoken replies ≤ 80 words, friendly and factual. If no results, say so and suggest close alternatives. When a clear lead is present, call estate_crm__create_lead with a short summary; use estate_crm__log_activity for notes or follow-ups.`;

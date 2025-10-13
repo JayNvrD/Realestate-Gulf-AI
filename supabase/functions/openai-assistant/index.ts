@@ -4,13 +4,13 @@ Deno.env.set('SUPABASE_FUNCTIONS_VERIFY_JWT', 'false');
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey, apikey',
 };
 
 const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')!;
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 
-const SYSTEM_PROMPT = `You are Estate Buddy, a concise real-estate voice assistant. Keep spoken replies under 80 words, friendly and factual.
+const SYSTEM_PROMPT = `You are Realestate AI, a concise real-estate voice assistant. Keep spoken replies under 80 words, friendly and factual.
 
 When users ask about properties, prices, amenities, availability, or locations, call estate_db__query.
 When you gather enough information about a serious buyer (name, contact, budget, location preference), call estate_crm__create_lead.
@@ -23,7 +23,7 @@ const ASSISTANT_TOOLS = [
     type: 'function',
     function: {
       name: 'estate_db__query',
-      description: 'Query properties and property FAQs from the Estate Buddy database. Use this for any questions about listings, prices, amenities, availability, or location.',
+      description: 'Query properties and property FAQs from the Realestate AI database. Use this for any questions about listings, prices, amenities, availability, or location.',
       parameters: {
         type: 'object',
         properties: {
@@ -125,39 +125,68 @@ const ASSISTANT_TOOLS = [
 
 async function callToolFunction(name: string, args: any): Promise<string> {
   const functionUrl = `${SUPABASE_URL}/functions/v1/${name.replace('__', '-')}`;
-  
+
+  console.log(`[OpenAI Assistant] Calling tool: ${name}`, args);
+
   try {
     const response = await fetch(functionUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(args)
     });
-    
+
     if (!response.ok) {
       const error = await response.text();
+      console.error(`[OpenAI Assistant] Tool ${name} failed:`, error);
       return JSON.stringify({ error: `Tool call failed: ${error}` });
     }
-    
+
     const data = await response.json();
+    console.log(`[OpenAI Assistant] Tool ${name} succeeded:`, data);
     return JSON.stringify(data);
   } catch (error: any) {
+    console.error(`[OpenAI Assistant] Tool ${name} exception:`, error);
     return JSON.stringify({ error: error.message });
   }
 }
 
 Deno.serve(async (req: Request) => {
+  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
 
+  const startTime = Date.now();
+  console.log('[OpenAI Assistant] Request received');
+
   try {
+    // Validate OpenAI API key
+    if (!OPENAI_API_KEY) {
+      console.error('[OpenAI Assistant] Missing OPENAI_API_KEY');
+      return new Response(
+        JSON.stringify({ error: 'OpenAI API key not configured' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const { message, threadId, systemPrompt } = await req.json();
+
+    if (!message) {
+      return new Response(
+        JSON.stringify({ error: 'Message is required' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log('[OpenAI Assistant] Message received:', message.substring(0, 50) + '...');
 
     const finalSystemPrompt = systemPrompt || SYSTEM_PROMPT;
 
     let currentThreadId = threadId;
-    
+
+    // Create thread if needed
     if (!currentThreadId) {
+      console.log('[OpenAI Assistant] Creating new thread');
       const threadResponse = await fetch('https://api.openai.com/v1/threads', {
         method: 'POST',
         headers: {
@@ -166,11 +195,21 @@ Deno.serve(async (req: Request) => {
           'OpenAI-Beta': 'assistants=v2'
         }
       });
+
+      if (!threadResponse.ok) {
+        const error = await threadResponse.text();
+        console.error('[OpenAI Assistant] Thread creation failed:', error);
+        throw new Error(`Failed to create thread: ${error}`);
+      }
+
       const threadData = await threadResponse.json();
       currentThreadId = threadData.id;
+      console.log('[OpenAI Assistant] Thread created:', currentThreadId);
     }
 
-    await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/messages`, {
+    // Add message to thread
+    console.log('[OpenAI Assistant] Adding message to thread');
+    const addMessageResponse = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/messages`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${OPENAI_API_KEY}`,
@@ -183,6 +222,14 @@ Deno.serve(async (req: Request) => {
       })
     });
 
+    if (!addMessageResponse.ok) {
+      const error = await addMessageResponse.text();
+      console.error('[OpenAI Assistant] Add message failed:', error);
+      throw new Error(`Failed to add message: ${error}`);
+    }
+
+    // Create assistant
+    console.log('[OpenAI Assistant] Creating assistant');
     const assistantResponse = await fetch('https://api.openai.com/v1/assistants', {
       method: 'POST',
       headers: {
@@ -191,14 +238,24 @@ Deno.serve(async (req: Request) => {
         'OpenAI-Beta': 'assistants=v2'
       },
       body: JSON.stringify({
-        name: 'Estate Buddy',
+        name: 'Realestate AI',
         model: 'gpt-4o-mini',
         instructions: finalSystemPrompt,
         tools: ASSISTANT_TOOLS
       })
     });
-    const assistant = await assistantResponse.json();
 
+    if (!assistantResponse.ok) {
+      const error = await assistantResponse.text();
+      console.error('[OpenAI Assistant] Assistant creation failed:', error);
+      throw new Error(`Failed to create assistant: ${error}`);
+    }
+
+    const assistant = await assistantResponse.json();
+    console.log('[OpenAI Assistant] Assistant created:', assistant.id);
+
+    // Create run
+    console.log('[OpenAI Assistant] Creating run');
     let runResponse = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/runs`, {
       method: 'POST',
       headers: {
@@ -210,20 +267,41 @@ Deno.serve(async (req: Request) => {
         assistant_id: assistant.id
       })
     });
-    let run = await runResponse.json();
 
-    while (true) {
+    if (!runResponse.ok) {
+      const error = await runResponse.text();
+      console.error('[OpenAI Assistant] Run creation failed:', error);
+      throw new Error(`Failed to create run: ${error}`);
+    }
+
+    let run = await runResponse.json();
+    console.log('[OpenAI Assistant] Run created:', run.id);
+
+    // Poll for completion
+    let pollCount = 0;
+    const maxPolls = 60; // 30 seconds max
+
+    while (pollCount < maxPolls) {
       const statusResponse = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/runs/${run.id}`, {
         headers: {
           'Authorization': `Bearer ${OPENAI_API_KEY}`,
           'OpenAI-Beta': 'assistants=v2'
         }
       });
+
+      if (!statusResponse.ok) {
+        const error = await statusResponse.text();
+        console.error('[OpenAI Assistant] Status check failed:', error);
+        throw new Error(`Failed to check run status: ${error}`);
+      }
+
       run = await statusResponse.json();
+      console.log('[OpenAI Assistant] Run status:', run.status);
 
       if (run.status === 'requires_action') {
         const toolCalls = run.required_action?.submit_tool_outputs?.tool_calls || [];
-        
+        console.log('[OpenAI Assistant] Processing', toolCalls.length, 'tool calls');
+
         const toolOutputs = await Promise.all(
           toolCalls.map(async (call: any) => {
             const args = JSON.parse(call.function.arguments);
@@ -235,7 +313,7 @@ Deno.serve(async (req: Request) => {
           })
         );
 
-        await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/runs/${run.id}/submit_tool_outputs`, {
+        const submitResponse = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/runs/${run.id}/submit_tool_outputs`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${OPENAI_API_KEY}`,
@@ -244,7 +322,15 @@ Deno.serve(async (req: Request) => {
           },
           body: JSON.stringify({ tool_outputs: toolOutputs })
         });
-        
+
+        if (!submitResponse.ok) {
+          const error = await submitResponse.text();
+          console.error('[OpenAI Assistant] Submit tool outputs failed:', error);
+          throw new Error(`Failed to submit tool outputs: ${error}`);
+        }
+
+        pollCount = 0; // Reset poll count after tool submission
+        await new Promise(resolve => setTimeout(resolve, 500));
         continue;
       }
 
@@ -252,32 +338,54 @@ Deno.serve(async (req: Request) => {
         break;
       }
 
+      pollCount++;
       await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    if (pollCount >= maxPolls) {
+      throw new Error('Run timed out after 30 seconds');
     }
 
     if (run.status !== 'completed') {
       throw new Error(`Run ended with status: ${run.status}`);
     }
 
+    // Get messages
+    console.log('[OpenAI Assistant] Fetching messages');
     const messagesResponse = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/messages`, {
       headers: {
         'Authorization': `Bearer ${OPENAI_API_KEY}`,
         'OpenAI-Beta': 'assistants=v2'
       }
     });
+
+    if (!messagesResponse.ok) {
+      const error = await messagesResponse.text();
+      console.error('[OpenAI Assistant] Fetch messages failed:', error);
+      throw new Error(`Failed to fetch messages: ${error}`);
+    }
+
     const messages = await messagesResponse.json();
-    
+
     const assistantMessage = messages.data.find((m: any) => m.role === 'assistant');
     const text = assistantMessage?.content?.[0]?.text?.value || 'I apologize, but I could not generate a response.';
+
+    const duration = Date.now() - startTime;
+    console.log(`[OpenAI Assistant] Request completed in ${duration}ms`);
 
     return new Response(
       JSON.stringify({ text, threadId: currentThreadId }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error: any) {
-    console.error('Error:', error);
+    const duration = Date.now() - startTime;
+    console.error(`[OpenAI Assistant] Error after ${duration}ms:`, error);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({
+        error: error.message || 'Internal server error',
+        details: error.stack,
+        timestamp: new Date().toISOString()
+      }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

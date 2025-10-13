@@ -39,7 +39,7 @@ export default function Layout() {
                 <Building2 className="w-6 h-6 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-gray-900">Estate Buddy</h1>
+                <h1 className="text-xl font-bold text-gray-900">Realestate AI</h1>
                 <p className="text-xs text-gray-600">Voice-First CRM</p>
               </div>
             </div>
