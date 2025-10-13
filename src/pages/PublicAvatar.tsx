@@ -27,8 +27,19 @@ class DeepgramSTTService {
     this.onTranscriptionCallback = onTranscription;
 
     console.log('[DeepgramSTT] Requesting microphone access...');
-    this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    this.audioContext = new AudioContext();
+    this.mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        sampleRate: 16000
+      }
+    });
+
+    // Create AudioContext with 16kHz sample rate to match Deepgram expectations
+    this.audioContext = new AudioContext({ sampleRate: 16000 });
+    console.log('[DeepgramSTT] AudioContext sample rate:', this.audioContext.sampleRate);
+
     this.source = this.audioContext.createMediaStreamSource(this.mediaStream);
     this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
 
@@ -58,15 +69,16 @@ class DeepgramSTTService {
     }
 
     const { key, token } = await response.json();
-    const deepgramToken = key || token;
-    if (!deepgramToken) throw new Error('[DeepgramSTT] No token returned from Supabase function');
-    console.log('[DeepgramSTT] 🔑 Token retrieved successfully');
+    const deepgramApiKey = key || token;
+    if (!deepgramApiKey) throw new Error('[DeepgramSTT] No API key returned from Supabase function');
+    console.log('[DeepgramSTT] 🔑 API key retrieved successfully');
+    console.log('[DeepgramSTT] API key (first 10 chars):', deepgramApiKey.substring(0, 10) + '...');
 
-    // 🎧 Connect to Deepgram WebSocket using token authentication
-    this.socket = new WebSocket(
-      'wss://api.deepgram.com/v1/listen?model=general&language=en-US&punctuate=true',
-      ['token', deepgramToken]
-    );
+    // 🎧 Connect to Deepgram WebSocket using Sec-WebSocket-Protocol authentication
+    // Format: ['token', '<API_KEY>'] which browser sends as "Sec-WebSocket-Protocol: token, <API_KEY>"
+    const wsUrl = 'wss://api.deepgram.com/v1/listen?model=nova-2&language=en-US&punctuate=true&encoding=linear16&sample_rate=16000';
+    console.log('[DeepgramSTT] Connecting to:', wsUrl);
+    this.socket = new WebSocket(wsUrl, ['token', deepgramApiKey]);
     this.socket.binaryType = 'arraybuffer';
 
     // 🔗 WebSocket lifecycle handlers
