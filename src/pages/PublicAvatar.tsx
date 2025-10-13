@@ -64,15 +64,27 @@ class DeepgramSTTService {
     // 🎧 Connect to Deepgram WebSocket using token authentication
     this.socket = new WebSocket(
       'wss://api.deepgram.com/v1/listen?model=general&language=en-US&punctuate=true',
-      ['token', deepgramToken]
+      `token ${deepgramToken}`
     );
     this.socket.binaryType = 'arraybuffer';
 
     // 🔗 WebSocket lifecycle handlers
-    this.socket.onopen = () => console.log('[DeepgramSTT] ✅ Connected to Deepgram');
-    this.socket.onerror = (err) => console.error('[DeepgramSTT] WebSocket error:', err);
-    this.socket.onclose = () => {
-      console.warn('[DeepgramSTT] ⚠️ Connection closed');
+    this.socket.onopen = () => {
+      console.log('[DeepgramSTT] ✅ Connected to Deepgram');
+      setInterval(() => {
+        if (this.socket?.readyState === WebSocket.OPEN) {
+          this.socket.send(JSON.stringify({ type: 'KeepAlive' }));
+        }
+      }, 3000);
+    };
+
+    this.socket.onerror = (err) => {
+      console.error('[DeepgramSTT] WebSocket error:', err);
+      console.warn('[DeepgramSTT] ⚠️ This likely means an invalid token or protocol format.');
+    };
+
+    this.socket.onclose = (event) => {
+      console.warn('[DeepgramSTT] ⚠️ Connection closed:', event.reason || event.code);
       if (!this.reconnecting) {
         this.reconnecting = true;
         console.log('[DeepgramSTT] Attempting reconnection in 3s...');

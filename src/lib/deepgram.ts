@@ -43,18 +43,29 @@ export class DeepgramSTTService {
     console.log('[DeepgramSTT] 🔑 Key retrieved successfully');
 
     // 🎧 Connect to Deepgram real-time WebSocket
-    const protocol = ['token', deepgramToken];
     this.socket = new WebSocket(
       'wss://api.deepgram.com/v1/listen?model=general&language=en-US&punctuate=true',
-      protocol
+      `token ${deepgramToken}`
     );
     this.socket.binaryType = 'arraybuffer';
 
     // 🔗 Connection lifecycle handlers
-    this.socket.onopen = () => console.log('[DeepgramSTT] ✅ Connected to Deepgram');
-    this.socket.onerror = (e) => console.error('[DeepgramSTT] WebSocket error:', e);
-    this.socket.onclose = () => {
-      console.warn('[DeepgramSTT] ⚠️ Connection closed');
+    this.socket.onopen = () => {
+      console.log('[DeepgramSTT] ✅ Connected to Deepgram');
+      setInterval(() => {
+        if (this.socket?.readyState === WebSocket.OPEN) {
+          this.socket.send(JSON.stringify({ type: 'KeepAlive' }));
+        }
+      }, 3000);
+    };
+
+    this.socket.onerror = (e) => {
+      console.error('[DeepgramSTT] WebSocket error:', e);
+      console.warn('[DeepgramSTT] ⚠️ This likely means an invalid token or protocol format.');
+    };
+
+    this.socket.onclose = (event) => {
+      console.warn('[DeepgramSTT] ⚠️ Connection closed:', event.reason || event.code);
       if (!this.reconnecting) {
         this.reconnecting = true;
         console.log('[DeepgramSTT] Attempting reconnection in 3s...');
