@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { Lead, Activity } from '../types/db';
 import LeadTable from '../components/LeadTable';
@@ -6,12 +6,19 @@ import LeadDrawer from '../components/LeadDrawer';
 import { useAuth } from '../contexts/AuthContext';
 import { Search, Filter, Download } from 'lucide-react';
 
+const segmentFilters = [
+  { id: 'all', label: 'All Leads' },
+  { id: 'high-intent', label: 'High Intent' },
+  { id: 'qualified', label: 'Qualified' },
+];
+
 export default function Leads() {
   const { user } = useAuth();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [leadActivities, setLeadActivities] = useState<Activity[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeSegment, setActiveSegment] = useState('all');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -74,15 +81,27 @@ export default function Leads() {
     }
   };
 
-  const filteredLeads = leads.filter((lead) => {
+  const filteredLeads = useMemo(() => {
     const query = searchQuery.toLowerCase();
-    return (
-      lead.full_name.toLowerCase().includes(query) ||
-      lead.email.toLowerCase().includes(query) ||
-      lead.phone.toLowerCase().includes(query) ||
-      lead.preferred_location.toLowerCase().includes(query)
-    );
-  });
+    return leads.filter((lead) => {
+      const matchesQuery =
+        lead.full_name.toLowerCase().includes(query) ||
+        lead.email.toLowerCase().includes(query) ||
+        lead.phone.toLowerCase().includes(query) ||
+        lead.preferred_location.toLowerCase().includes(query);
+
+      if (!matchesQuery) return false;
+
+      if (activeSegment === 'high-intent') {
+        return lead.intent_level === 'high';
+      }
+      if (activeSegment === 'qualified') {
+        return lead.stage === 'Qualified';
+      }
+
+      return true;
+    });
+  }, [leads, searchQuery, activeSegment]);
 
   const handleExport = () => {
     const csv = [
@@ -111,56 +130,75 @@ export default function Leads() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-gray-600">Loading leads...</div>
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <div className="rounded-xl border border-slate-200 bg-white px-6 py-4 text-sm text-slate-500 shadow-sm">
+          Loading leads...
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Lead Management</h1>
-          <p className="text-gray-600">View and manage all your real estate leads</p>
+    <div className="space-y-8">
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-cyan-600">Pipeline</p>
+          <h1 className="text-3xl font-semibold text-slate-900 sm:text-fluid-3xl">Lead Management</h1>
+          <p className="text-sm text-slate-500">View and manage all your real estate leads with quick filters and actions.</p>
         </div>
         <button
           onClick={handleExport}
-          className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-cyan-300 hover:text-cyan-700"
         >
-          <Download className="w-5 h-5" />
+          <Download className="h-4 w-4" />
           Export CSV
         </button>
-      </div>
+      </header>
 
-      <div className="flex gap-4">
-        <div className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search leads by name, email, phone, or location..."
-            className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
-          />
+      <div className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by name, email, phone, or location"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm text-slate-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-cyan-500"
+            />
+          </div>
+          <button className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 transition hover:border-cyan-300 hover:text-cyan-700">
+            <Filter className="h-4 w-4" />
+            Filters
+          </button>
         </div>
-        <button className="flex items-center gap-2 px-4 py-3 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-          <Filter className="w-5 h-5" />
-          Filters
-        </button>
-      </div>
 
-      <div className="bg-white rounded-2xl border border-gray-200 p-4">
-        <div className="flex gap-4 mb-4">
-          <button className="px-4 py-2 bg-cyan-600 text-white rounded-lg text-sm font-medium">
-            All Leads ({filteredLeads.length})
-          </button>
-          <button className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors">
-            High Intent ({filteredLeads.filter((l) => l.intent_level === 'high').length})
-          </button>
-          <button className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors">
-            Qualified ({filteredLeads.filter((l) => l.stage === 'Qualified').length})
-          </button>
+        <div className="flex flex-wrap gap-2">
+          {segmentFilters.map((segment) => {
+            const isActive = activeSegment === segment.id;
+            const count =
+              segment.id === 'all'
+                ? filteredLeads.length
+                : segment.id === 'high-intent'
+                ? filteredLeads.filter((l) => l.intent_level === 'high').length
+                : filteredLeads.filter((l) => l.stage === 'Qualified').length;
+            return (
+              <button
+                key={segment.id}
+                onClick={() => setActiveSegment(segment.id)}
+                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                  isActive
+                    ? 'bg-cyan-600 text-white shadow'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {segment.label}
+                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${isActive ? 'bg-white/20' : 'bg-white text-slate-500'}`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 

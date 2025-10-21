@@ -1,17 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import KPI from '../components/KPI';
 import ChartCard from '../components/ChartCard';
 import ActivityList from '../components/ActivityList';
+import { Users, TrendingUp, Target, Award } from 'lucide-react';
 import {
-  Users,
-  TrendingUp,
-  Target,
-  Award,
-} from 'lucide-react';
-import {
-  BarChart,
-  Bar,
   LineChart,
   Line,
   PieChart,
@@ -57,18 +50,23 @@ export default function Dashboard() {
     }
   };
 
-  const intentChartData = intentCounts.map((item) => ({
-    name: item.intent_level,
-    value: item.count,
-  }));
+  const intentChartData = useMemo(
+    () =>
+      intentCounts.map((item) => ({
+        name: item.intent_level,
+        value: item.count,
+      })),
+    [intentCounts],
+  );
 
-  const conversionChartData = conversionAvgs
-    ? [
-        { period: '3 Months', probability: Math.round((conversionAvgs.avg_3m || 0) * 100) },
-        { period: '6 Months', probability: Math.round((conversionAvgs.avg_6m || 0) * 100) },
-        { period: '9 Months', probability: Math.round((conversionAvgs.avg_9m || 0) * 100) },
-      ]
-    : [];
+  const conversionChartData = useMemo(() => {
+    if (!conversionAvgs) return [];
+    return [
+      { period: '3 Months', probability: Math.round((conversionAvgs.avg_3m || 0) * 100) },
+      { period: '6 Months', probability: Math.round((conversionAvgs.avg_6m || 0) * 100) },
+      { period: '9 Months', probability: Math.round((conversionAvgs.avg_9m || 0) * 100) },
+    ];
+  }, [conversionAvgs]);
 
   const COLORS = ['#06b6d4', '#3b82f6', '#6366f1', '#10b981', '#f59e0b'];
 
@@ -82,96 +80,115 @@ export default function Dashboard() {
     ? Math.round(((conversionAvgs.avg_3m + conversionAvgs.avg_6m + conversionAvgs.avg_9m) / 3) * 100)
     : 0;
 
+  const kpis = [
+    {
+      title: 'New Leads Today',
+      value: overview?.new_today || 0,
+      change: '+12% from yesterday',
+      changeType: 'positive' as const,
+      icon: Users,
+      iconColor: 'bg-gradient-to-br from-cyan-500 to-blue-600',
+    },
+    {
+      title: 'High Intent',
+      value: `${highIntentPercent}%`,
+      change: `${overview?.high_intent || 0} leads`,
+      changeType: 'positive' as const,
+      icon: Target,
+      iconColor: 'bg-gradient-to-br from-emerald-500 to-teal-600',
+    },
+    {
+      title: 'Avg Conversion',
+      value: `${avgConversion}%`,
+      change: '3-9 month outlook',
+      changeType: 'neutral' as const,
+      icon: TrendingUp,
+      iconColor: 'bg-gradient-to-br from-blue-500 to-cyan-600',
+    },
+    {
+      title: 'Closed Deals',
+      value: overview?.closed_deals || 0,
+      change: `${overview?.total_leads || 0} total leads`,
+      changeType: 'positive' as const,
+      icon: Award,
+      iconColor: 'bg-gradient-to-br from-amber-500 to-orange-600',
+    },
+  ];
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-gray-600">Loading dashboard...</div>
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <div className="rounded-xl border border-slate-200 bg-white px-6 py-4 text-sm text-slate-500 shadow-sm">
+          Loading dashboard...
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Dashboard</h1>
-        <p className="text-gray-600">Welcome back! Here's your Realestate AI overview.</p>
+    <div className="space-y-8">
+      <header className="space-y-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-cyan-600">Overview</p>
+        <h1 className="text-3xl font-semibold text-slate-900 sm:text-fluid-3xl">Dashboard</h1>
+        <p className="text-sm text-slate-500">
+          Welcome back! Here's your Realestate AI overview across leads, conversations, and performance.
+        </p>
+      </header>
+
+      <div className="-mx-4 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-4 sm:mx-0 sm:grid sm:grid-cols-2 sm:gap-5 sm:overflow-visible sm:pb-0 xl:grid-cols-4">
+        {kpis.map((kpi) => (
+          <KPI
+            key={kpi.title}
+            {...kpi}
+            className="min-w-[16rem] snap-start sm:min-w-0"
+          />
+        ))}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <KPI
-          title="New Leads Today"
-          value={overview?.new_today || 0}
-          change="+12% from yesterday"
-          changeType="positive"
-          icon={Users}
-          iconColor="bg-gradient-to-br from-cyan-500 to-blue-600"
-        />
-        <KPI
-          title="High Intent"
-          value={`${highIntentPercent}%`}
-          change={`${overview?.high_intent || 0} leads`}
-          changeType="positive"
-          icon={Target}
-          iconColor="bg-gradient-to-br from-emerald-500 to-teal-600"
-        />
-        <KPI
-          title="Avg Conversion"
-          value={`${avgConversion}%`}
-          change="3-9 month outlook"
-          changeType="neutral"
-          icon={TrendingUp}
-          iconColor="bg-gradient-to-br from-blue-500 to-cyan-600"
-        />
-        <KPI
-          title="Closed Deals"
-          value={overview?.closed_deals || 0}
-          change={`${overview?.total_leads || 0} total leads`}
-          changeType="positive"
-          icon={Award}
-          iconColor="bg-gradient-to-br from-amber-500 to-orange-600"
-        />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <ChartCard title="Buyer Intent Distribution" subtitle="Lead categorization by intent level">
-          <ResponsiveContainer width="100%" height={300}>
-            <PieChart>
-              <Pie
-                data={intentChartData}
-                cx="50%"
-                cy="50%"
-                labelLine={false}
-                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                outerRadius={80}
-                fill="#8884d8"
-                dataKey="value"
-              >
-                {intentChartData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
+          <div className="h-64 sm:h-72 lg:h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={intentChartData}
+                  cx="50%"
+                  cy="50%"
+                  labelLine={false}
+                  label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                  outerRadius="80%"
+                  dataKey="value"
+                >
+                  {intentChartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip wrapperClassName="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-lg" />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
         </ChartCard>
 
         <ChartCard title="Conversion Probability Forecast" subtitle="Average conversion rates over time">
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={conversionChartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis dataKey="period" stroke="#6b7280" />
-              <YAxis stroke="#6b7280" />
-              <Tooltip />
-              <Legend />
-              <Line
-                type="monotone"
-                dataKey="probability"
-                stroke="#06b6d4"
-                strokeWidth={3}
-                dot={{ fill: '#06b6d4', r: 6 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
+          <div className="h-64 sm:h-72 lg:h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={conversionChartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="period" stroke="#94a3b8" tick={{ fontSize: 12 }} interval={0} />
+                <YAxis stroke="#94a3b8" tick={{ fontSize: 12 }} domain={[0, 100]} />
+                <Tooltip wrapperClassName="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-lg" />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Line
+                  type="monotone"
+                  dataKey="probability"
+                  stroke="#06b6d4"
+                  strokeWidth={3}
+                  dot={{ fill: '#06b6d4', r: 4 }}
+                  activeDot={{ r: 6 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
         </ChartCard>
       </div>
 
