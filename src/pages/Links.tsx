@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { PublicLink, AIAvatar } from '../types/db';
 import { useAuth } from '../contexts/AuthContext';
@@ -19,6 +19,7 @@ export default function Links() {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [copySuccess, setCopySuccess] = useState('');
 
   useEffect(() => {
     loadData();
@@ -37,9 +38,9 @@ export default function Links() {
 
       setLinks(linksRes.data || []);
       setAvatars(avatarsRes.data || []);
-    } catch (error: any) {
-      console.error('Error loading data:', error);
-      setError(error.message || 'Failed to load data');
+    } catch (loadError: any) {
+      console.error('Error loading data:', loadError);
+      setError(loadError.message || 'Failed to load data');
     } finally {
       setLoading(false);
     }
@@ -51,41 +52,37 @@ export default function Links() {
 
     try {
       if (editingId) {
-        const { error } = await supabase
+        const { error: updateError } = await supabase
           .from('public_links')
           .update({
             slug: formData.slug,
             title: formData.title,
             avatar_id: formData.avatarId || null,
-            config: {
-              model: formData.model,
-            },
+            config: { model: formData.model },
             rate_limit_per_min: formData.rateLimitPerMin,
             updated_at: new Date().toISOString(),
           })
           .eq('id', editingId);
 
-        if (error) throw error;
+        if (updateError) throw updateError;
       } else {
-        const { error } = await supabase.from('public_links').insert({
+        const { error: insertError } = await supabase.from('public_links').insert({
           slug: formData.slug,
           title: formData.title,
           is_enabled: true,
           avatar_id: formData.avatarId || null,
-          config: {
-            model: formData.model,
-          },
+          config: { model: formData.model },
           rate_limit_per_min: formData.rateLimitPerMin,
           created_by: user.id,
         });
 
-        if (error) throw error;
+        if (insertError) throw insertError;
       }
 
       resetForm();
       loadData();
-    } catch (error) {
-      console.error('Error saving link:', error);
+    } catch (submitError) {
+      console.error('Error saving link:', submitError);
       alert('Error saving link. Please check the slug is unique.');
     }
   };
@@ -104,15 +101,15 @@ export default function Links() {
 
   const handleToggleEnabled = async (id: string, currentState: boolean) => {
     try {
-      const { error } = await supabase
+      const { error: toggleError } = await supabase
         .from('public_links')
         .update({ is_enabled: !currentState })
         .eq('id', id);
 
-      if (error) throw error;
+      if (toggleError) throw toggleError;
       loadData();
-    } catch (error) {
-      console.error('Error toggling link:', error);
+    } catch (toggleError) {
+      console.error('Error toggling link:', toggleError);
     }
   };
 
@@ -120,18 +117,23 @@ export default function Links() {
     if (!confirm('Are you sure you want to delete this link?')) return;
 
     try {
-      const { error } = await supabase.from('public_links').delete().eq('id', id);
-      if (error) throw error;
+      const { error: deleteError } = await supabase.from('public_links').delete().eq('id', id);
+      if (deleteError) throw deleteError;
       loadData();
-    } catch (error) {
-      console.error('Error deleting link:', error);
+    } catch (deleteError) {
+      console.error('Error deleting link:', deleteError);
     }
   };
 
-  const copyToClipboard = (slug: string) => {
+  const copyToClipboard = async (slug: string) => {
     const url = `${window.location.origin}/avatar/${slug}`;
-    navigator.clipboard.writeText(url);
-    alert('Link copied to clipboard!');
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopySuccess('Link copied to clipboard!');
+      setTimeout(() => setCopySuccess(''), 2000);
+    } catch (copyError) {
+      console.error('Copy failed', copyError);
+    }
   };
 
   const resetForm = () => {
@@ -148,250 +150,245 @@ export default function Links() {
 
   const getAvatarName = (avatarId: string | null) => {
     if (!avatarId) return 'No avatar';
-    const avatar = avatars.find(a => a.id === avatarId);
+    const avatar = avatars.find((item) => item.id === avatarId);
     return avatar ? avatar.name : 'Unknown avatar';
   };
 
+  const linkCountLabel = useMemo(() => {
+    if (links.length === 0) return 'No links yet';
+    return `${links.length} link${links.length === 1 ? '' : 's'}`;
+  }, [links.length]);
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-600 mx-auto mb-4"></div>
-          <div className="text-gray-600">Loading public links...</div>
-        </div>
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <div className="text-center text-sm text-slate-500">Loading public links...</div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Public Links</h1>
-          <p className="text-gray-600">
-            Create shareable links for your AI avatars
-            {links.length > 0 && <span className="ml-2 text-cyan-600 font-semibold">({links.length} link{links.length !== 1 ? 's' : ''})</span>}
+    <div className="space-y-8">
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-cyan-600">Distribution</p>
+          <h1 className="text-3xl font-semibold text-slate-900 sm:text-fluid-3xl">Public Links</h1>
+          <p className="text-sm text-slate-500">
+            Create shareable links for your AI avatars.
+            <span className="ml-2 font-semibold text-cyan-600">{linkCountLabel}</span>
           </p>
         </div>
         <button
-          onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-white rounded-lg hover:shadow-lg transition-all"
+          onClick={() => setShowForm((prev) => !prev)}
+          className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:from-cyan-600 hover:to-blue-700"
         >
-          <Plus className="w-5 h-5" />
-          Create Link
+          <Plus className="h-4 w-4" />
+          {showForm ? 'Hide Form' : 'Create Link'}
         </button>
-      </div>
+      </header>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
-          <X className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <h4 className="text-sm font-semibold text-red-800 mb-1">Error Loading Data</h4>
-            <p className="text-sm text-red-600">{error}</p>
-            <button
-              onClick={loadData}
-              className="mt-2 text-sm text-red-700 hover:text-red-800 font-medium underline"
-            >
+        <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          <X className="mt-0.5 h-5 w-5 flex-shrink-0" />
+          <div className="space-y-2">
+            <p className="font-semibold">Error loading data</p>
+            <p>{error}</p>
+            <button onClick={loadData} className="font-semibold text-red-600 underline">
               Try again
             </button>
           </div>
         </div>
       )}
 
+      {copySuccess && <p className="text-xs font-semibold text-emerald-600">{copySuccess}</p>}
+
       {avatars.length === 0 && !error && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <p className="text-yellow-800 text-sm">
-            No active avatars found. Please create an avatar first in the AI Avatars page.
-          </p>
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+          No active avatars found. Please create an avatar first in the AI Avatars page.
         </div>
       )}
 
       {showForm && (
-        <div className="bg-white rounded-2xl border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">
-            {editingId ? 'Edit Public Link' : 'Create New Public Link'}
-          </h3>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">URL Slug</label>
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h3 className="text-lg font-semibold text-slate-900">{editingId ? 'Edit Public Link' : 'Create New Public Link'}</h3>
+          <form onSubmit={handleSubmit} className="mt-6 space-y-6">
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="flex flex-col gap-2 text-sm font-medium text-slate-600">
+                URL Slug
                 <input
                   type="text"
                   value={formData.slug}
                   onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
                   placeholder="property-showcase"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-cyan-500"
                   required
                 />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+              </label>
+              <label className="flex flex-col gap-2 text-sm font-medium text-slate-600">
+                Title
                 <input
                   type="text"
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                   placeholder="Property Showcase"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-cyan-500"
                   required
                 />
-              </div>
+              </label>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-700">
                 AI Avatar
-                <span className="ml-2 text-xs text-gray-500">({avatars.length} available)</span>
+                <span className="ml-2 text-xs text-slate-400">{avatars.length} available</span>
               </label>
               <select
                 value={formData.avatarId}
                 onChange={(e) => setFormData({ ...formData, avatarId: e.target.value })}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+                className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm text-slate-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-cyan-500"
                 required
                 disabled={avatars.length === 0}
               >
-                <option value="">
-                  {avatars.length === 0 ? 'No active avatars available' : 'Select an avatar...'}
-                </option>
+                <option value="">{avatars.length === 0 ? 'No active avatars available' : 'Select an avatar…'}</option>
                 {avatars.map((avatar) => (
                   <option key={avatar.id} value={avatar.id}>
                     {avatar.name} ({avatar.heygen_avatar_id})
                   </option>
                 ))}
               </select>
-              <p className="mt-1 text-xs text-gray-500">
-                The avatar's system prompt will be used for this link. Only active avatars are shown.
-              </p>
+              <p className="text-xs text-slate-500">The avatar's system prompt will be used for this link.</p>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="flex flex-col gap-2 text-sm font-medium text-slate-600">
+                Model
                 <select
                   value={formData.model}
                   onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-cyan-500"
                 >
                   <option value="gpt-4o-mini">GPT-4o Mini</option>
                   <option value="gpt-4o">GPT-4o</option>
                   <option value="gpt-4-turbo">GPT-4 Turbo</option>
                 </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Rate Limit/Min</label>
+              </label>
+              <label className="flex flex-col gap-2 text-sm font-medium text-slate-600">
+                Rate Limit/Min
                 <input
                   type="number"
                   value={formData.rateLimitPerMin}
-                  onChange={(e) => setFormData({ ...formData, rateLimitPerMin: parseInt(e.target.value) })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
-                  min="1"
+                  onChange={(e) => setFormData({ ...formData, rateLimitPerMin: parseInt(e.target.value, 10) || 1 })}
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                  min={1}
                 />
-              </div>
+              </label>
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <button
                 type="submit"
-                className="px-6 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-white rounded-lg hover:shadow-lg transition-all"
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-6 py-2 text-sm font-semibold text-white shadow-sm transition hover:from-cyan-600 hover:to-blue-600"
               >
                 {editingId ? 'Update Link' : 'Create Link'}
               </button>
               <button
                 type="button"
                 onClick={resetForm}
-                className="px-6 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                className="rounded-xl border border-slate-200 px-6 py-2 text-sm font-semibold text-slate-600 transition hover:border-cyan-300 hover:text-cyan-700"
               >
                 Cancel
               </button>
             </div>
           </form>
-        </div>
+        </section>
       )}
 
-      <div className="grid grid-cols-1 gap-4">
+      <section className="grid gap-4">
         {links.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center">
-            <LinkIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-600">No public links created yet</p>
+          <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center shadow-sm">
+            <LinkIcon className="mx-auto h-16 w-16 text-slate-300" />
+            <p className="mt-4 text-sm text-slate-500">No public links created yet.</p>
           </div>
         ) : (
           links.map((link) => (
-            <div key={link.id} className="bg-white rounded-2xl border border-gray-200 p-6">
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <h3 className="text-lg font-semibold text-gray-900">{link.title}</h3>
+            <article
+              key={link.id}
+              className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-cyan-200 hover:shadow-md"
+            >
+              <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <h3 className="text-lg font-semibold text-slate-900">{link.title}</h3>
                     <span
-                      className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        link.is_enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-700'
+                      className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                        link.is_enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
                       }`}
                     >
                       {link.is_enabled ? 'Enabled' : 'Disabled'}
                     </span>
                   </div>
-
-                  <div className="flex items-center gap-2 mb-3">
-                    <code className="px-3 py-1 bg-gray-100 text-gray-800 rounded text-sm">
-                      /avatar/{link.slug}
-                    </code>
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+                    <code className="rounded-xl bg-slate-100 px-3 py-1 text-xs text-slate-700">/avatar/{link.slug}</code>
                     <button
                       onClick={() => copyToClipboard(link.slug)}
-                      className="p-1 hover:bg-gray-100 rounded transition-colors"
+                      className="rounded-lg p-1 text-slate-500 transition hover:bg-slate-100 hover:text-cyan-700"
                     >
-                      <Copy className="w-4 h-4 text-gray-600" />
+                      <Copy className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => window.open(`/avatar/${link.slug}`, '_blank')}
+                      className="rounded-lg p-1 text-slate-500 transition hover:bg-slate-100 hover:text-cyan-700"
+                    >
+                      <Eye className="h-4 w-4" />
                     </button>
                   </div>
-
-                  <div className="grid grid-cols-3 gap-4 text-sm">
+                  <div className="grid gap-3 text-xs font-medium uppercase tracking-wide text-slate-400 sm:grid-cols-3">
                     <div>
-                      <p className="text-gray-600">Avatar</p>
-                      <p className="font-medium text-gray-900">{getAvatarName(link.avatar_id)}</p>
+                      <p>Avatar</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-700">{getAvatarName(link.avatar_id)}</p>
                     </div>
                     <div>
-                      <p className="text-gray-600">Model</p>
-                      <p className="font-medium text-gray-900">{link.config.model || 'gpt-4o-mini'}</p>
+                      <p>Model</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-700">{link.config.model || 'gpt-4o-mini'}</p>
                     </div>
                     <div>
-                      <p className="text-gray-600">Rate Limit</p>
-                      <p className="font-medium text-gray-900">{link.rate_limit_per_min}/min</p>
+                      <p>Rate Limit</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-700">{link.rate_limit_per_min}/min</p>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => window.open(`/avatar/${link.slug}`, '_blank')}
-                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                  >
-                    <Eye className="w-5 h-5 text-gray-600" />
-                  </button>
+                <div className="flex flex-wrap gap-2 sm:flex-col sm:items-end">
                   <button
                     onClick={() => handleEdit(link)}
-                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-cyan-300 hover:text-cyan-700"
                   >
-                    <Edit className="w-5 h-5 text-gray-600" />
+                    <Edit className="h-4 w-4" />
+                    Edit
                   </button>
                   <button
                     onClick={() => handleToggleEnabled(link.id, link.is_enabled)}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${
                       link.is_enabled
-                        ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                        ? 'border border-slate-200 text-slate-600 hover:border-slate-300 hover:text-slate-700'
+                        : 'border border-emerald-200 text-emerald-700 hover:border-emerald-300 hover:text-emerald-800'
                     }`}
                   >
                     {link.is_enabled ? 'Disable' : 'Enable'}
                   </button>
                   <button
                     onClick={() => handleDelete(link.id)}
-                    className="p-2 hover:bg-red-50 rounded-lg transition-colors"
+                    className="inline-flex items-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 transition hover:border-red-300 hover:text-red-700"
                   >
-                    <Trash2 className="w-5 h-5 text-red-600" />
+                    <Trash2 className="h-4 w-4" />
+                    Delete
                   </button>
                 </div>
-              </div>
-            </div>
+              </header>
+            </article>
           ))
         )}
-      </div>
+      </section>
     </div>
   );
 }

@@ -163,6 +163,7 @@ export default function PublicAvatar() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [conversationEntries, setConversationEntries] = useState<ConversationEntry[]>([]);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [showMobilePanel, setShowMobilePanel] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const avatarServiceRef = useRef<HeyGenAvatarService | null>(null);
@@ -181,6 +182,12 @@ export default function PublicAvatar() {
   useEffect(() => {
     conversationEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [conversationEntries]);
+
+  useEffect(() => {
+    if (!isInitialized) {
+      setShowMobilePanel(false);
+    }
+  }, [isInitialized]);
 
   const loadLink = async () => {
     try {
@@ -309,115 +316,163 @@ export default function PublicAvatar() {
   }
 
   return (
-    <div className="fixed inset-0 overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          className="absolute inset-0 w-full h-full object-cover"
-          style={{ display: isInitialized ? 'block' : 'none' }}
-        />
-      </div>
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${
+          isInitialized ? 'opacity-100' : 'opacity-0'
+        }`}
+      />
 
       {isInitialized && (
         <button
           onClick={endSession}
-          className="fixed top-6 right-6 z-50 px-6 py-3 bg-red-500 hover:bg-red-600 text-white rounded-lg font-semibold flex items-center gap-2 transition-all shadow-lg hover:shadow-red-500/50"
+          className="fixed top-4 right-4 z-50 inline-flex items-center gap-2 rounded-full bg-red-500 px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:bg-red-600 hover:shadow-red-500/40 sm:top-6 sm:right-6 sm:px-6 sm:py-3 sm:text-base"
         >
-          <X className="w-5 h-5" />
+          <X className="h-4 w-4 sm:h-5 sm:w-5" />
           End Session
         </button>
       )}
 
-      <div className="relative z-10 w-full h-full flex items-center justify-center p-6">
+      <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6 py-12">
         {!isInitialized ? (
-          <div className="text-center px-6">
-            <div className="w-32 h-32 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-full flex items-center justify-center mx-auto mb-8 shadow-2xl shadow-blue-500/50">
-              <MessageCircle className="w-16 h-16 text-white" />
+          <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-slate-900/50 p-8 text-center backdrop-blur-xl">
+            <div className="mx-auto mb-8 flex h-28 w-28 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 shadow-2xl shadow-blue-500/50">
+              <MessageCircle className="h-14 w-14 text-white" />
             </div>
-            <h2 className="text-3xl font-bold text-white mb-3">{link.title}</h2>
-            <p className="text-slate-300 text-lg mb-2 max-w-md mx-auto">{avatar.name}</p>
-            <p className="text-slate-400 text-sm mb-8 max-w-md mx-auto">
-              Start speaking to interact with your AI assistant
+            <h2 className="text-3xl font-bold text-white sm:text-4xl">{link.title}</h2>
+            <p className="mt-3 text-base text-slate-300">{avatar.name}</p>
+            <p className="mt-4 text-sm text-slate-400">
+              Start speaking to interact with your AI assistant. We recommend using headphones for the best experience.
             </p>
             <button
               onClick={initializeAvatar}
               disabled={loading || isConnecting}
-              className="px-10 py-4 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-xl text-lg font-semibold hover:shadow-2xl hover:shadow-blue-500/50 transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="mt-8 inline-flex items-center justify-center rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 px-8 py-3 text-base font-semibold text-white shadow-lg transition hover:scale-105 hover:shadow-blue-500/40 disabled:opacity-50"
             >
-              Start Conversation
+              {isConnecting ? 'Connecting…' : 'Start Conversation'}
             </button>
           </div>
         ) : (
-          <div className="fixed left-6 top-6 bottom-6 w-96 bg-slate-800/40 backdrop-blur-xl rounded-2xl p-6 border border-white/10 shadow-2xl flex flex-col">
-            <div className="mb-4">
-              <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                <MessageCircle className="w-5 h-5" />
-                Conversation
-              </h2>
-              <p className="text-sm text-slate-400 mt-1">Live transcript</p>
-            </div>
-            <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
-              {conversationEntries.map((entry, idx) => (
-                <div
-                  key={idx}
-                  className={`p-3 rounded-lg ${
-                    entry.role === 'user'
-                      ? 'bg-blue-500/20 border border-blue-500/30'
-                      : 'bg-slate-700/40 border border-slate-600/30'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <span
-                      className={`text-xs font-semibold ${
-                        entry.role === 'user' ? 'text-blue-400' : 'text-emerald-400'
+          <>
+            <div className="hidden w-full max-w-4xl justify-end lg:flex">
+              <div className="flex h-[32rem] w-[24rem] flex-col rounded-2xl border border-white/10 bg-slate-800/60 p-6 backdrop-blur-xl">
+                <header className="mb-4">
+                  <h2 className="flex items-center gap-2 text-xl font-semibold text-white">
+                    <MessageCircle className="h-5 w-5" /> Conversation
+                  </h2>
+                  <p className="text-sm text-slate-400">Live transcript</p>
+                </header>
+                <div className="flex-1 space-y-3 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+                  {conversationEntries.map((entry, idx) => (
+                    <div
+                      key={idx}
+                      className={`rounded-xl border px-4 py-3 text-sm leading-relaxed ${
+                        entry.role === 'user'
+                          ? 'border-blue-500/30 bg-blue-500/10 text-blue-100'
+                          : 'border-emerald-500/20 bg-slate-700/40 text-slate-100'
                       }`}
                     >
-                      {entry.role === 'user' ? 'You' : 'Assistant'}
-                    </span>
-                    <span className="text-xs text-slate-500">
-                      {entry.timestamp.toLocaleTimeString()}
-                    </span>
-                  </div>
-                  <p className="text-sm text-slate-200 leading-relaxed">{entry.text}</p>
+                      <div className="mb-1 flex items-center gap-2 text-xs">
+                        <span className={entry.role === 'user' ? 'font-semibold text-blue-200' : 'font-semibold text-emerald-200'}>
+                          {entry.role === 'user' ? 'You' : 'Assistant'}
+                        </span>
+                        <span className="text-slate-400">{entry.timestamp.toLocaleTimeString()}</span>
+                      </div>
+                      {entry.text}
+                    </div>
+                  ))}
+                  <div ref={conversationEndRef} />
                 </div>
-              ))}
-              <div ref={conversationEndRef} />
+              </div>
             </div>
-          </div>
+
+            <div className="flex w-full flex-col items-center gap-4 lg:hidden">
+              <button
+                onClick={() => setShowMobilePanel((prev) => !prev)}
+                className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-slate-900/80 px-5 py-2 text-sm font-semibold text-slate-100 backdrop-blur-sm"
+              >
+                <MessageCircle className="h-4 w-4" /> {showMobilePanel ? 'Hide Transcript' : 'Show Transcript'}
+              </button>
+            </div>
+
+            <div
+              className={`fixed inset-x-0 bottom-0 z-40 rounded-t-3xl border border-white/10 bg-slate-900/95 p-6 shadow-2xl transition-transform duration-300 backdrop-blur-xl lg:hidden ${
+                showMobilePanel ? 'translate-y-0' : 'translate-y-[70%]'
+              }`}
+            >
+              <div className="mx-auto h-1.5 w-16 rounded-full bg-white/20" />
+              <header className="mt-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-base font-semibold text-white">Conversation</h2>
+                  <p className="text-xs text-slate-400">Live transcript</p>
+                </div>
+                <button
+                  onClick={() => setShowMobilePanel(false)}
+                  className="rounded-full p-2 text-slate-400 transition hover:bg-white/10 hover:text-slate-200"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </header>
+              <div className="mt-4 max-h-64 space-y-3 overflow-y-auto pr-2 text-sm text-slate-100">
+                {conversationEntries.map((entry, idx) => (
+                  <div
+                    key={idx}
+                    className={`rounded-2xl px-4 py-3 ${
+                      entry.role === 'user' ? 'bg-blue-500/20 text-blue-100' : 'bg-slate-700/50 text-slate-100'
+                    }`}
+                  >
+                    <div className="mb-1 flex items-center gap-2 text-xs">
+                      <span className="font-semibold">
+                        {entry.role === 'user' ? 'You' : 'Assistant'}
+                      </span>
+                      <span className="text-slate-400">{entry.timestamp.toLocaleTimeString()}</span>
+                    </div>
+                    {entry.text}
+                  </div>
+                ))}
+                <div ref={conversationEndRef} />
+              </div>
+            </div>
+          </>
         )}
       </div>
 
       {isInitialized && (
-        <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-20 bg-slate-900/80 backdrop-blur-sm px-6 py-3 rounded-full border border-slate-700">
+        <div
+          className={`fixed left-1/2 z-40 -translate-x-1/2 rounded-full border border-slate-700 bg-slate-900/80 px-5 py-2 text-xs text-slate-200 backdrop-blur-sm shadow-lg transition-all sm:px-6 sm:py-3 sm:text-sm ${
+            showMobilePanel ? 'bottom-40' : 'bottom-6'
+          }`}
+        >
           {isSpeaking ? (
             <div className="flex items-center gap-3">
               <div className="flex gap-1">
-                <div className="w-1 h-4 bg-blue-400 rounded-full animate-pulse"></div>
-                <div className="w-1 h-4 bg-blue-400 rounded-full animate-pulse delay-150"></div>
-                <div className="w-1 h-4 bg-blue-400 rounded-full animate-pulse delay-300"></div>
+                <div className="h-4 w-1 animate-pulse rounded-full bg-blue-400"></div>
+                <div className="h-4 w-1 animate-pulse rounded-full bg-blue-400 delay-150"></div>
+                <div className="h-4 w-1 animate-pulse rounded-full bg-blue-400 delay-300"></div>
               </div>
-              <span className="text-sm text-slate-300 font-medium">Processing...</span>
+              <span className="font-medium">Processing…</span>
             </div>
           ) : (
-            <div className="flex items-center gap-4 text-sm text-slate-400">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                <span>Voice Active</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                <span>AI Listening</span>
-              </div>
+            <div className="flex items-center gap-4">
+              <span className="flex items-center gap-2">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400"></span>
+                Voice Active
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-blue-400"></span>
+                AI Listening
+              </span>
             </div>
           )}
         </div>
       )}
 
-      <div className="fixed bottom-4 right-4 text-xs text-white/40 flex items-center gap-2 z-10">
-        <span className="opacity-60">Powered by</span>
-        <span className="font-semibold text-white/60">HeyGen × Deepgram</span>
+      <div className="fixed bottom-4 right-4 z-20 flex items-center gap-2 text-xs text-white/50">
+        <span>Powered by</span>
+        <span className="font-semibold text-white/70">HeyGen × Deepgram</span>
       </div>
     </div>
   );

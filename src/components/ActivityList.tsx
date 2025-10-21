@@ -29,40 +29,43 @@ export default function ActivityList({ activities }: ActivityListProps) {
       case 'status':
         return 'bg-emerald-100 text-emerald-600';
       default:
-        return 'bg-gray-100 text-gray-600';
+        return 'bg-slate-100 text-slate-600';
     }
   };
 
+  if (activities.length === 0) {
+    return <p className="py-8 text-center text-sm text-slate-500">No recent activities</p>;
+  }
+
   return (
-    <div className="space-y-4">
-      {activities.length === 0 ? (
-        <p className="text-gray-600 text-sm text-center py-8">No recent activities</p>
-      ) : (
-        activities.map((activity) => {
-          const Icon = getIcon(activity.type);
-          return (
-            <div key={activity.id} className="flex gap-4 p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
-              <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${getIconColor(activity.type)}`}>
-                <Icon className="w-5 h-5" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-medium text-gray-600 uppercase">{activity.type}</span>
-                  <span className="text-xs text-gray-400">
-                    {new Date(activity.created_at).toLocaleString()}
-                  </span>
-                </div>
-                <p className="text-sm text-gray-900">{activity.message}</p>
-                {activity.due_at && (
-                  <p className="text-xs text-gray-600 mt-1">
-                    Due: {new Date(activity.due_at).toLocaleString()}
-                  </p>
-                )}
-              </div>
+    <ul className="space-y-4">
+      {activities.map((activity) => {
+        const Icon = getIcon(activity.type);
+        return (
+          <li
+            key={activity.id}
+            className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4 transition hover:bg-slate-100 sm:flex-row sm:items-center"
+          >
+            <div
+              className={`flex h-12 w-12 items-center justify-center self-start rounded-full sm:self-center ${getIconColor(
+                activity.type,
+              )}`}
+            >
+              <Icon className="h-5 w-5" />
             </div>
-          );
-        })
-      )}
-    </div>
+            <div className="flex-1 space-y-2">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium uppercase tracking-wide text-slate-500">
+                <span>{activity.type}</span>
+                <span className="text-slate-400">{new Date(activity.created_at).toLocaleString()}</span>
+              </div>
+              <p className="text-sm text-slate-700">{activity.message}</p>
+              {activity.due_at && (
+                <p className="text-xs text-slate-500">Due: {new Date(activity.due_at).toLocaleString()}</p>
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

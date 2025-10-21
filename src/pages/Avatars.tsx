@@ -1,14 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { AIAvatar } from '../types/db';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, Edit, Trash2, Bot, Save, X } from 'lucide-react';
+import { Plus, Edit, Trash2, Bot, Save, X, Sparkles } from 'lucide-react';
 
 export default function Avatars() {
   const { user } = useAuth();
   const [avatars, setAvatars] = useState<AIAvatar[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [promptExpanded, setPromptExpanded] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     heygen_avatar_id: 'Wayne_20240711',
@@ -24,16 +25,16 @@ export default function Avatars() {
   const loadAvatars = async () => {
     try {
       setError('');
-      const { data, error } = await supabase
+      const { data, error: fetchError } = await supabase
         .from('ai_avatars')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (fetchError) throw fetchError;
       setAvatars(data || []);
-    } catch (error: any) {
-      console.error('Error loading avatars:', error);
-      setError(error.message || 'Failed to load avatars');
+    } catch (fetchError: any) {
+      console.error('Error loading avatars:', fetchError);
+      setError(fetchError.message || 'Failed to load avatars');
     } finally {
       setLoading(false);
     }
@@ -45,7 +46,7 @@ export default function Avatars() {
 
     try {
       if (editingId) {
-        const { error } = await supabase
+        const { error: updateError } = await supabase
           .from('ai_avatars')
           .update({
             name: formData.name,
@@ -55,9 +56,9 @@ export default function Avatars() {
           })
           .eq('id', editingId);
 
-        if (error) throw error;
+        if (updateError) throw updateError;
       } else {
-        const { error } = await supabase.from('ai_avatars').insert({
+        const { error: insertError } = await supabase.from('ai_avatars').insert({
           name: formData.name,
           heygen_avatar_id: formData.heygen_avatar_id,
           system_prompt: formData.system_prompt,
@@ -65,13 +66,13 @@ export default function Avatars() {
           created_by: user.id,
         });
 
-        if (error) throw error;
+        if (insertError) throw insertError;
       }
 
       resetForm();
       loadAvatars();
-    } catch (error) {
-      console.error('Error saving avatar:', error);
+    } catch (submitError) {
+      console.error('Error saving avatar:', submitError);
       alert('Error saving avatar. Please try again.');
     }
   };
@@ -83,20 +84,21 @@ export default function Avatars() {
       heygen_avatar_id: avatar.heygen_avatar_id,
       system_prompt: avatar.system_prompt,
     });
+    setPromptExpanded(false);
     setShowForm(true);
   };
 
   const handleToggleActive = async (id: string, currentState: boolean) => {
     try {
-      const { error } = await supabase
+      const { error: toggleError } = await supabase
         .from('ai_avatars')
         .update({ is_active: !currentState })
         .eq('id', id);
 
-      if (error) throw error;
+      if (toggleError) throw toggleError;
       loadAvatars();
-    } catch (error) {
-      console.error('Error toggling avatar:', error);
+    } catch (toggleError) {
+      console.error('Error toggling avatar:', toggleError);
     }
   };
 
@@ -104,11 +106,11 @@ export default function Avatars() {
     if (!confirm('Are you sure you want to delete this avatar? This cannot be undone.')) return;
 
     try {
-      const { error } = await supabase.from('ai_avatars').delete().eq('id', id);
-      if (error) throw error;
+      const { error: deleteError } = await supabase.from('ai_avatars').delete().eq('id', id);
+      if (deleteError) throw deleteError;
       loadAvatars();
-    } catch (error) {
-      console.error('Error deleting avatar:', error);
+    } catch (deleteError) {
+      console.error('Error deleting avatar:', deleteError);
       alert('Error deleting avatar. It may be in use by a public link.');
     }
   };
@@ -116,6 +118,7 @@ export default function Avatars() {
   const resetForm = () => {
     setShowForm(false);
     setEditingId(null);
+    setPromptExpanded(false);
     setFormData({
       name: '',
       heygen_avatar_id: 'Wayne_20240711',
@@ -181,52 +184,53 @@ Strict Rules:
   };
 
   const fillDefaultPrompt = () => {
-    setFormData({
-      ...formData,
+    setFormData((prev) => ({
+      ...prev,
       system_prompt: getDefaultPromptTemplate(),
-    });
+    }));
+    setPromptExpanded(true);
   };
+
+  const avatarCountLabel = useMemo(() => {
+    if (avatars.length === 0) return 'No avatars yet';
+    return `${avatars.length} avatar${avatars.length === 1 ? '' : 's'}`;
+  }, [avatars.length]);
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-600 mx-auto mb-4"></div>
-          <div className="text-gray-600">Loading avatars...</div>
-        </div>
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <div className="text-center text-sm text-slate-500">Loading avatars...</div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">AI Avatars</h1>
-          <p className="text-gray-600">
-            Create and manage AI avatar configurations with custom prompts
-            {avatars.length > 0 && <span className="ml-2 text-cyan-600 font-semibold">({avatars.length} avatar{avatars.length !== 1 ? 's' : ''})</span>}
+    <div className="space-y-8">
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-cyan-600">Automation</p>
+          <h1 className="text-3xl font-semibold text-slate-900 sm:text-fluid-3xl">AI Avatars</h1>
+          <p className="text-sm text-slate-500">
+            Create and manage AI avatar configurations with custom prompts.
+            <span className="ml-2 font-semibold text-cyan-600">{avatarCountLabel}</span>
           </p>
         </div>
         <button
-          onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-white rounded-lg hover:shadow-lg transition-all"
+          onClick={() => setShowForm((prev) => !prev)}
+          className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:from-cyan-600 hover:to-blue-700"
         >
-          <Plus className="w-5 h-5" />
-          Create Avatar
+          <Plus className="h-4 w-4" />
+          {showForm ? 'Hide Form' : 'Create Avatar'}
         </button>
-      </div>
+      </header>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
-          <X className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <h4 className="text-sm font-semibold text-red-800 mb-1">Error Loading Avatars</h4>
-            <p className="text-sm text-red-600">{error}</p>
-            <button
-              onClick={loadAvatars}
-              className="mt-2 text-sm text-red-700 hover:text-red-800 font-medium underline"
-            >
+        <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          <X className="mt-0.5 h-5 w-5 flex-shrink-0" />
+          <div className="space-y-2">
+            <p className="font-semibold">Error loading avatars</p>
+            <p>{error}</p>
+            <button onClick={loadAvatars} className="font-semibold text-red-600 underline">
               Try again
             </button>
           </div>
@@ -234,164 +238,184 @@ Strict Rules:
       )}
 
       {showForm && (
-        <div className="bg-white rounded-2xl border border-gray-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900">
-              {editingId ? 'Edit Avatar' : 'Create New Avatar'}
-            </h3>
-            <button onClick={resetForm} className="text-gray-400 hover:text-gray-600">
-              <X className="w-5 h-5" />
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">{editingId ? 'Edit Avatar' : 'Create New Avatar'}</h3>
+              <p className="text-xs text-slate-500">Provide a name, HeyGen avatar ID, and a structured system prompt.</p>
+            </div>
+            <button onClick={resetForm} className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600">
+              <X className="h-4 w-4" />
             </button>
           </div>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Avatar Name</label>
+
+          <form onSubmit={handleSubmit} className="mt-6 space-y-6">
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="flex flex-col gap-2 text-sm font-medium text-slate-600">
+                Avatar Name
                 <input
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   placeholder="Realestate AI - Property Expert"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-cyan-500"
                   required
                 />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">HeyGen Avatar ID</label>
+              </label>
+              <label className="flex flex-col gap-2 text-sm font-medium text-slate-600">
+                HeyGen Avatar ID
                 <input
                   type="text"
                   value={formData.heygen_avatar_id}
                   onChange={(e) => setFormData({ ...formData, heygen_avatar_id: e.target.value })}
                   placeholder="Wayne_20240711"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-cyan-500"
                   required
                 />
-              </div>
+              </label>
             </div>
 
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="block text-sm font-medium text-gray-700">System Prompt</label>
-                {!formData.system_prompt && (
+            <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+              <summary className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-700">
+                <Sparkles className="h-4 w-4 text-cyan-600" /> Advanced Settings
+              </summary>
+              <p className="mt-3 text-xs text-slate-500">
+                Add escalation contacts, fallback responses, or multi-language guidance here.
+              </p>
+              <textarea
+                className="mt-3 w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                placeholder="Optional: Provide additional escalation or compliance instructions"
+                rows={4}
+              />
+            </details>
+
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="text-sm font-semibold text-slate-700">System Prompt</label>
+                <div className="flex items-center gap-3 text-xs font-medium">
+                  {!formData.system_prompt && (
+                    <button
+                      type="button"
+                      onClick={fillDefaultPrompt}
+                      className="text-cyan-600 transition hover:text-cyan-700"
+                    >
+                      Load Template
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={fillDefaultPrompt}
-                    className="text-xs text-cyan-600 hover:text-cyan-700 font-medium"
+                    onClick={() => setPromptExpanded((prev) => !prev)}
+                    className="rounded-full border border-slate-200 px-3 py-1 text-slate-600 transition hover:border-cyan-300 hover:text-cyan-700"
                   >
-                    Load Template
+                    {promptExpanded ? 'Collapse' : 'Expand'}
                   </button>
-                )}
+                </div>
               </div>
               <textarea
                 value={formData.system_prompt}
                 onChange={(e) => setFormData({ ...formData, system_prompt: e.target.value })}
                 placeholder="Enter your AI avatar system prompt following best practices..."
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent resize-none font-mono text-sm"
-                rows={20}
+                className="w-full resize-y rounded-2xl border border-slate-200 px-4 py-3 font-mono text-sm text-slate-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                rows={promptExpanded ? 18 : 8}
                 required
               />
-              <p className="mt-2 text-xs text-gray-500">
+              <p className="text-xs text-slate-500">
                 Follow the prompt engineering framework: Role, Personality, Company Details, Objective, Process, Conversation Flow, and Strict Rules.
               </p>
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <button
                 type="submit"
-                className="flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-white rounded-lg hover:shadow-lg transition-all"
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-6 py-2 text-sm font-semibold text-white shadow-sm transition hover:from-cyan-600 hover:to-blue-600"
               >
-                <Save className="w-4 h-4" />
+                <Save className="h-4 w-4" />
                 {editingId ? 'Update Avatar' : 'Create Avatar'}
               </button>
               <button
                 type="button"
                 onClick={resetForm}
-                className="px-6 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                className="rounded-xl border border-slate-200 px-6 py-2 text-sm font-semibold text-slate-600 transition hover:border-cyan-300 hover:text-cyan-700"
               >
                 Cancel
               </button>
             </div>
           </form>
-        </div>
+        </section>
       )}
 
-      <div className="grid grid-cols-1 gap-4">
+      <section className="grid gap-4">
         {avatars.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center">
-            <Bot className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-600 mb-2">No AI avatars created yet</p>
-            <p className="text-sm text-gray-500">Create your first avatar to get started</p>
+          <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center shadow-sm">
+            <Bot className="mx-auto h-16 w-16 text-slate-300" />
+            <p className="mt-4 text-sm text-slate-500">No AI avatars created yet. Use the form above to create one.</p>
           </div>
         ) : (
           avatars.map((avatar) => (
-            <div key={avatar.id} className="bg-white rounded-2xl border border-gray-200 p-6">
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <Bot className="w-5 h-5 text-cyan-600" />
-                    <h3 className="text-lg font-semibold text-gray-900">{avatar.name}</h3>
+            <article
+              key={avatar.id}
+              className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-cyan-200 hover:shadow-md"
+            >
+              <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Bot className="h-5 w-5 text-cyan-600" />
+                    <h3 className="text-lg font-semibold text-slate-900">{avatar.name}</h3>
                     <span
-                      className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        avatar.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-700'
+                      className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                        avatar.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
                       }`}
                     >
                       {avatar.is_active ? 'Active' : 'Inactive'}
                     </span>
                   </div>
-
-                  <div className="mb-3">
-                    <code className="px-3 py-1 bg-gray-100 text-gray-800 rounded text-sm">
-                      {avatar.heygen_avatar_id}
-                    </code>
+                  <code className="inline-block rounded-xl bg-slate-100 px-3 py-1 text-xs text-slate-700">
+                    {avatar.heygen_avatar_id}
+                  </code>
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs text-slate-600">
+                    <p className="mb-1 font-semibold text-slate-700">System Prompt Preview</p>
+                    <pre className="max-h-32 overflow-y-auto whitespace-pre-wrap font-mono">
+                      {avatar.system_prompt.substring(0, 320)}
+                      {avatar.system_prompt.length > 320 && '…'}
+                    </pre>
                   </div>
-
-                  <div className="mb-3">
-                    <p className="text-sm text-gray-600 mb-1">System Prompt Preview:</p>
-                    <div className="bg-gray-50 rounded-lg p-3 max-h-32 overflow-y-auto">
-                      <pre className="text-xs text-gray-700 whitespace-pre-wrap font-mono">
-                        {avatar.system_prompt.substring(0, 300)}
-                        {avatar.system_prompt.length > 300 && '...'}
-                      </pre>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-4 text-xs text-gray-500">
+                  <div className="flex flex-wrap gap-4 text-xs text-slate-500">
                     <span>Created: {new Date(avatar.created_at).toLocaleDateString()}</span>
                     <span>Updated: {new Date(avatar.updated_at).toLocaleDateString()}</span>
                   </div>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2 sm:flex-col sm:items-end">
                   <button
                     onClick={() => handleEdit(avatar)}
-                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                    title="Edit Avatar"
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-cyan-300 hover:text-cyan-700"
                   >
-                    <Edit className="w-5 h-5 text-gray-600" />
+                    <Edit className="h-4 w-4" />
+                    Edit
                   </button>
                   <button
                     onClick={() => handleToggleActive(avatar.id, avatar.is_active)}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${
                       avatar.is_active
-                        ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                        ? 'border border-slate-200 text-slate-600 hover:border-slate-300 hover:text-slate-700'
+                        : 'border border-emerald-200 text-emerald-700 hover:border-emerald-300 hover:text-emerald-800'
                     }`}
                   >
                     {avatar.is_active ? 'Deactivate' : 'Activate'}
                   </button>
                   <button
                     onClick={() => handleDelete(avatar.id)}
-                    className="p-2 hover:bg-red-50 rounded-lg transition-colors"
-                    title="Delete Avatar"
+                    className="inline-flex items-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 transition hover:border-red-300 hover:text-red-700"
                   >
-                    <Trash2 className="w-5 h-5 text-red-600" />
+                    <Trash2 className="h-4 w-4" />
+                    Delete
                   </button>
                 </div>
-              </div>
-            </div>
+              </header>
+            </article>
           ))
         )}
-      </div>
+      </section>
     </div>
   );
 }
